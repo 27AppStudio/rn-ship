@@ -2,7 +2,7 @@
 
 EAS-style CI/CD for **bare React Native** apps: a fastlane plugin plus GitHub composite actions. No Expo account; it runs on your own CI, GitHub-hosted runners or a self-hosted Mac.
 
-> **Work in progress.** v0.1 is being extracted from the pipeline [Splitify](https://splitify.cc) ships to TestFlight and Google Play with. Each part below is marked ✅ shipped or 🚧 planned.
+> **Work in progress.** v0.1 is being extracted from the pipeline [Splitify](https://splitify.cc) ships to TestFlight and Google Play with. Each part below is marked shipped or planned.
 
 - [Status](#status)
 - [Architecture](#architecture)
@@ -24,16 +24,16 @@ EAS-style CI/CD for **bare React Native** apps: a fastlane plugin plus GitHub co
 
 | Part | What it does | Status |
 |---|---|---|
-| `rn_ship_config` | Loads and validates `rn-ship.yml`, reporting every problem with its key path. | ✅ |
-| `rn_ship_next_version` | Next version + build number from the store state. The store is the source of truth, a live version gets a patch bump, and `monotonic_build` keeps Play versionCodes counting. | ✅ |
-| `rn_ship_push_release` | Rebases the bump commit onto the remote branch, tags it and pushes both with `--atomic`, retrying when the other platform pushed first. | ✅ |
-| Store state readers | Reads the latest beta and live versions from TestFlight / App Store, and the internal track, highest versionCode and production release from Google Play. | 🚧 |
-| CI signing | A dedicated keychain on self-hosted Macs, read-only match everywhere, signing settings for the app and every extension. | 🚧 |
-| Android guards | Refuses to build without the upload key, refuses to ship a debug-signed AAB, pins the env file. Also reads/writes the Gradle version. | 🚧 |
-| Play listing | Assembles store copy into a `supply` folder with Play's character limits checked. | 🚧 |
-| Reference lanes | `beta`, `release`, `bump_version` Fastfiles you copy and own. | 🚧 |
-| GitHub composite actions | `setup`, `ios-deploy`, `android-deploy`, `select-runner`, `notify`. | 🚧 |
-| `init` scaffolder | Adds flavors, schemes and configurations to an existing project (`eas build:configure`). | 🚧 phase 2 |
+| `rn_ship_config` | Loads and validates `rn-ship.yml`, reporting every problem with its key path. | Shipped |
+| `rn_ship_next_version` | Next version + build number from the store state. The store is the source of truth, a live version gets a patch bump, and `monotonic_build` keeps Play versionCodes counting. | Shipped |
+| `rn_ship_push_release` | Rebases the bump commit onto the remote branch, tags it and pushes both with `--atomic`, retrying when the other platform pushed first. | Shipped |
+| Store state readers | Reads the latest beta and live versions from TestFlight / App Store, and the internal track, highest versionCode and production release from Google Play. | Planned |
+| CI signing | A dedicated keychain on self-hosted Macs, read-only match everywhere, signing settings for the app and every extension. | Planned |
+| Android guards | Refuses to build without the upload key, refuses to ship a debug-signed AAB, pins the env file. Also reads/writes the Gradle version. | Planned |
+| Play listing | Assembles store copy into a `supply` folder with Play's character limits checked. | Planned |
+| Reference lanes | `beta`, `release`, `bump_version` Fastfiles you copy and own. | Planned |
+| GitHub composite actions | `setup`, `ios-deploy`, `android-deploy`, `select-runner`, `notify`. | Planned |
+| `init` scaffolder | Adds flavors, schemes and configurations to an existing project (`eas build:configure`). | Planned (phase 2) |
 
 ## Architecture
 
@@ -43,19 +43,19 @@ rn-ship has four layers. Each one only talks to the layer below it, and each can
 
 ```mermaid
 flowchart TB
-  subgraph CI["GitHub Actions 🚧"]
+  subgraph CI["GitHub Actions (planned)"]
     WF["your workflow<br/>(push to staging / main, dispatch)"]
     CA["rn-ship composite actions<br/>setup · ios-deploy · android-deploy · select-runner · notify"]
   end
 
   subgraph Lanes["Your Fastfiles"]
-    L["beta · release · bump_version<br/>(copied from rn-ship's reference lanes 🚧, then yours)"]
+    L["beta · release · bump_version<br/>copied from rn-ship's reference lanes (planned), then yours"]
   end
 
   subgraph Plugin["fastlane-plugin-rn_ship"]
     A["Actions: thin adapters<br/>options · type coercion · lane_context"]
-    HP["Pure helpers ✅<br/>RnShipVersioning · RnShipConfigSchema"]
-    HS["Side-effect helpers<br/>RnShipGitRelease ✅ · store state 🚧 · signing 🚧"]
+    HP["Pure helpers<br/>RnShipVersioning · RnShipConfigSchema"]
+    HS["Side-effect helpers<br/>RnShipGitRelease · store state (planned) · signing (planned)"]
   end
 
   CFG[("rn-ship.yml<br/>flavor map")]
@@ -94,7 +94,7 @@ flowchart TB
 
 ### Lifecycle of a beta deploy
 
-What happens on a push to `staging`, once the reference lanes and composite actions exist. Each step is marked with what does it today.
+What happens on a push to `staging`, once the reference lanes and composite actions exist. Steps marked (planned) don't exist yet.
 
 ```mermaid
 sequenceDiagram
@@ -105,18 +105,18 @@ sequenceDiagram
   participant Store as TestFlight / Play
   participant Git as origin
 
-  GH->>Lane: push to staging → ios-deploy / android-deploy 🚧
-  Lane->>RS: rn_ship_config ✅
+  GH->>Lane: push to staging → ios-deploy / android-deploy (planned)
+  Lane->>RS: rn_ship_config
   RS-->>Lane: flavor_for_branch("staging") → scheme, bundle id, env file
-  Lane->>Store: latest beta, live version, highest build 🚧
-  Lane->>RS: rn_ship_next_version ✅
+  Lane->>Store: latest beta, live version, highest build (planned)
+  Lane->>RS: rn_ship_next_version
   RS-->>Lane: { version: "1.3.0", build: 14 }
   Lane->>Lane: write version, commit bump
-  Lane->>Lane: signing 🚧 · match (read-only) · gym / gradle
+  Lane->>Lane: signing (planned) · match (read-only) · gym / gradle
   Lane->>Store: upload (pilot / supply)
-  Lane->>RS: rn_ship_push_release ✅
+  Lane->>RS: rn_ship_push_release
   RS->>Git: rebase onto origin/staging, tag, push --atomic
-  GH->>GH: remove credentials · notify 🚧
+  GH->>GH: remove credentials · notify (planned)
 ```
 
 The order is deliberate. The version is resolved from the store *before* the build, so the binary carries the right number. The bump commit and its tag are pushed *after* the upload, so a tag always points at something that is really on the store.
@@ -168,9 +168,9 @@ sequenceDiagram
   iOS->>iOS: commit bump 1.3.0 (14)
   Droid->>Droid: commit bump 1.3.0 (52)
   Note over iOS,Droid: ~15 min build + upload in parallel
-  Droid->>O: fetch · rebase · tag · push --atomic ✔
-  iOS->>O: fetch · rebase · tag · push --atomic ✘ (rejected)
-  iOS->>O: retry: fetch · rebase · tag · push --atomic ✔
+  Droid->>O: fetch · rebase · tag · push --atomic: accepted
+  iOS->>O: fetch · rebase · tag · push --atomic: rejected
+  iOS->>O: retry: fetch · rebase · tag · push --atomic: accepted
 ```
 
 | Step | Why |
@@ -215,13 +215,13 @@ rn-ship.yml is invalid:
 
 | Threat | Mitigation | Status |
 |---|---|---|
-| Secret committed in config | The config only accepts env var *names* (`/\A[A-Z_][A-Z0-9_]*\z/`). Anything else fails validation. | ✅ |
-| Secret echoed into CI logs | Errors on credential fields never print the value (only its type, for non-strings). | ✅ |
-| Secret expanded by the shell | Composite actions write secrets through `env:` + `printf`, never `${{ secrets.X }}` inside `run:`, where `$`, backticks and quotes in the value are expanded. | 🚧 |
-| CI creating or revoking certificates | match runs `readonly` on every CI runner, not just self-hosted ones. | 🚧 |
-| Taking over a developer's login keychain (self-hosted Mac) | A dedicated non-default keychain with a random password, first in the search list, deleted in `after_all` / `error`. Archives go to `$RUNNER_TEMP`. | 🚧 |
-| Credentials left on a persistent runner | Cleanup with `if: always()` removes keys, env files, the generated `.env` and `ios/tmp.xcconfig`. | 🚧 |
-| Shipping a debug-signed AAB | The upload key is required, and the AAB's SHA-256 is compared against the debug keystore before upload. The first AAB permanently enrolls its key on Play. | 🚧 |
+| Secret committed in config | The config only accepts env var *names* (`/\A[A-Z_][A-Z0-9_]*\z/`). Anything else fails validation. | Shipped |
+| Secret echoed into CI logs | Errors on credential fields never print the value (only its type, for non-strings). | Shipped |
+| Secret expanded by the shell | Composite actions write secrets through `env:` + `printf`, never `${{ secrets.X }}` inside `run:`, where `$`, backticks and quotes in the value are expanded. | Planned |
+| CI creating or revoking certificates | match runs `readonly` on every CI runner, not just self-hosted ones. | Planned |
+| Taking over a developer's login keychain (self-hosted Mac) | A dedicated non-default keychain with a random password, first in the search list, deleted in `after_all` / `error`. Archives go to `$RUNNER_TEMP`. | Planned |
+| Credentials left on a persistent runner | Cleanup with `if: always()` removes keys, env files, the generated `.env` and `ios/tmp.xcconfig`. | Planned |
+| Shipping a debug-signed AAB | The upload key is required, and the AAB's SHA-256 is compared against the debug keystore before upload. The first AAB permanently enrolls its key on Play. | Planned |
 | Build-only keys inside the app | react-native-config compiles *every* key of the env file into the app. Keep CI credentials out of `.env.*` files and in CI env vars. | documented |
 
 ### Coming from EAS
@@ -246,19 +246,19 @@ rn-ship/
 │   └── rn_ship/
 │       ├── version.rb
 │       ├── helper/
-│       │   ├── versioning.rb          # ✅ pure: bump_semver, resolve_next_version
-│       │   ├── config_schema.rb       # ✅ pure: SCHEMA + validator
-│       │   ├── config.rb              # ✅ RnShipConfig: loading, lookups, tags
-│       │   └── git_release.rb         # ✅ push_release
+│       │   ├── versioning.rb          # pure: bump_semver, resolve_next_version
+│       │   ├── config_schema.rb       # pure: SCHEMA + validator
+│       │   ├── config.rb              # RnShipConfig: loading, lookups, tags
+│       │   └── git_release.rb         # push_release
 │       └── actions/
-│           ├── rn_ship_config.rb      # ✅
-│           ├── rn_ship_next_version.rb# ✅
-│           └── rn_ship_push_release.rb# ✅
-├── spec/                              # ✅ RSpec, fixtures/splitify.yml
-├── templates/                         # 🚧 reference Fastfiles
-├── actions/                           # 🚧 GitHub composite actions
-├── scripts/ci-runner.sh               # 🚧 self-hosted Mac runner manager
-└── example/                           # 🚧 RN CLI app with dev/staging/prod
+│           ├── rn_ship_config.rb
+│           ├── rn_ship_next_version.rb
+│           └── rn_ship_push_release.rb
+├── spec/                              # RSpec, fixtures/splitify.yml
+├── templates/                         # planned: reference Fastfiles
+├── actions/                           # planned: GitHub composite actions
+├── scripts/ci-runner.sh               # planned: self-hosted Mac runner manager
+└── example/                           # planned: RN CLI app with dev/staging/prod
 ```
 
 The gem and the GitHub actions share one repo and one version tag, so `fastlane-plugin-rn_ship 0.1.0` and `uses: 27AppStudio/rn-ship/actions/ios-deploy@v0.1.0` always match.

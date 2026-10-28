@@ -2,6 +2,8 @@
 
 [README](../README.md) · [Architecture](architecture.md) · [Configuration](configuration.md) · [Security](security.md) · [Testing](testing.md)
 
+## Format
+
 The `eas.json` of a bare project, at the repo root. It maps each flavor to a branch, an env file, an iOS scheme/configuration/bundle id and a Gradle flavor/package name. Credentials are referenced by **environment variable name** only; the defaults are fastlane's own (`APP_STORE_CONNECT_API_KEY_*`, `SUPPLY_JSON_KEY_DATA`).
 
 ```yaml
@@ -44,7 +46,7 @@ flavors:
 
 [`spec/fixtures/splitify.yml`](../spec/fixtures/splitify.yml) is a complete real-world example.
 
-### Android upload key
+## Android upload key
 
 `upload_key_prefix` names the Gradle properties your `signingConfigs` read. Set them as `ORG_GRADLE_PROJECT_<name>` on CI, or in `~/.gradle/gradle.properties` locally (rn-ship looks in the same places as Gradle: CI env, then `GRADLE_USER_HOME`, then the project's `gradle.properties`). The snippet below falls back to the debug key when the properties are missing, so local release builds still work. `rn_ship_android_preflight` and `rn_ship_verify_aab` are what keep such a build off the store:
 

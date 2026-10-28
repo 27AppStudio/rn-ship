@@ -10,21 +10,6 @@
 # Options: flavor:<name> (default: the flavor whose branch is checked out), bump:major|minor|patch
 # (beta only: start a new version instead of the next build).
 
-# The flavor to ship: flavor: wins, else the flavor that deploys from this branch. GitHub Actions
-# can check out a detached HEAD, which fastlane's git_branch then reports as "HEAD".
-def ship_flavor(config, options)
-  return config.flavor(options[:flavor]) if options[:flavor]
-
-  branch = ENV["GITHUB_REF_NAME"].to_s.empty? ? git_branch : ENV["GITHUB_REF_NAME"]
-  config.flavor_for_branch(branch)
-end
-
-# A release is cut from the branch its flavor deploys from, so the tag lands on what shipped.
-def ensure_release_branch!(flavor)
-  branch = ENV["GITHUB_REF_NAME"].to_s.empty? ? git_branch : ENV["GITHUB_REF_NAME"]
-  UI.user_error!("#{flavor.name} is released from #{flavor.branch}, not #{branch}") unless branch == flavor.branch
-end
-
 # [skip ci]: the bump commit must not start another deploy when pushed with a token that
 # triggers workflows (a deploy key or a PAT; GITHUB_TOKEN pushes never do).
 def bump_message(platform, version)
@@ -36,18 +21,21 @@ def push_tag!(tag, message)
   push_git_tags(tag: tag)
 end
 
-def export_method(match_type)
-  { "appstore" => "app-store", "adhoc" => "ad-hoc", "enterprise" => "enterprise", "development" => "development" }.fetch(match_type)
-end
-
 # Gradle task names capitalize the flavor's first letter only: prodEu -> bundleProdEuRelease.
 def gradle_flavor(name)
   name[0].upcase + name[1..]
 end
 
-def play_release_status(config)
-  status = ENV[config.android["play"]["release_status_env"]].to_s.strip
-  status.empty? ? "completed" : status
+# What every Play call shares: the app, the beta track, the key, the release status, and no
+# store listing (that is edited in the Play Console, or with supply on its own).
+def play_options(config, flavor)
+  play = config.android["play"]
+  status = ENV[play["release_status_env"]].to_s.strip
+  {
+    package_name: flavor.android["package_name"], track: play["track"], json_key_data: ENV[play["json_key_env"]],
+    release_status: status.empty? ? "completed" : status,
+    skip_upload_metadata: true, skip_upload_changelogs: true, skip_upload_images: true, skip_upload_screenshots: true
+  }
 end
 
 platform :ios do
@@ -57,7 +45,7 @@ platform :ios do
   desc "Build the flavor and upload it to TestFlight. Options: flavor:, bump:"
   lane :beta do |options|
     config = rn_ship_config
-    flavor = ship_flavor(config, options)
+    flavor = config.flavor_for(options[:flavor])
     ios = config.ios
 
     # Everything that can fail cheaply fails before anything is committed or built.
@@ -67,18 +55,19 @@ platform :ios do
     current = rn_ship_xcode_version(flavor: flavor.name)
     version = rn_ship_next_version(current_version: current[:version], current_build: current[:build], bump: options[:bump],
                                    **rn_ship_store_state(flavor: flavor.name))
-    rn_ship_xcode_version(flavor: flavor.name, **version)
-    git_commit(path: lane_context[SharedValues::RN_SHIP_VERSION_FILES], message: bump_message("iOS", version))
+    written = rn_ship_xcode_version(flavor: flavor.name, **version)
+    git_commit(path: written[:files], message: bump_message("iOS", version))
 
-    # match is read-only on CI (rn_ship_ci_signing); git_url falls back to a Matchfile.
+    # match is read-only on CI (rn_ship_ci_signing). A nil git_url falls back to a Matchfile, a
+    # nil archive_path to gym's default: fastlane treats nil options as unset.
     match(type: ios["match"]["type"], app_identifier: config.ios_app_identifiers(flavor.name), team_id: ios["team_id"],
-          **{ git_url: ios["match"]["git_url"] }.compact)
+          git_url: ios["match"]["git_url"])
     rn_ship_ios_signing(flavor: flavor.name)
 
     build_app(workspace: config.expand(ios["workspace"]), scheme: flavor.ios["scheme"], configuration: flavor.ios["configuration"],
-              export_method: export_method(ios["match"]["type"]), **{ archive_path: signing[:archive_path] }.compact)
-    upload_to_testflight(api_key: lane_context[SharedValues::APP_STORE_CONNECT_API_KEY],
-                         skip_waiting_for_build_processing: true, skip_submission: true)
+              export_method: config.ios_export_method, archive_path: signing[:archive_path])
+    # The App Store Connect key rn_ship_store_state loaded is picked up from the lane context.
+    upload_to_testflight(skip_waiting_for_build_processing: true, skip_submission: true)
 
     rn_ship_push_release(branch: flavor.branch, tag: config.beta_tag(platform: :ios, flavor: flavor.name, **version))
   end
@@ -86,15 +75,15 @@ platform :ios do
   desc "Submit the flavor's latest TestFlight build for App Store review. Options: flavor:"
   lane :release do |options|
     config = rn_ship_config
-    flavor = ship_flavor(config, options)
-    ensure_release_branch!(flavor)
+    flavor = config.flavor_for(options[:flavor])
+    config.ensure_release_branch!(flavor)
 
     store = rn_ship_store_state(flavor: flavor.name)
     UI.user_error!("Nothing on TestFlight for #{flavor.ios['bundle_id']} yet") if store[:latest_build].to_i.zero?
 
     # Store copy in fastlane/metadata (deliver's layout) goes up with the submission when present.
     metadata = File.join(FastlaneCore::FastlaneFolder.path, "metadata")
-    deliver(api_key: lane_context[SharedValues::APP_STORE_CONNECT_API_KEY], app_identifier: flavor.ios["bundle_id"],
+    deliver(app_identifier: flavor.ios["bundle_id"],
             app_version: store[:latest_version], build_number: store[:latest_build].to_s,
             submit_for_review: true, automatic_release: true, force: true,
             skip_binary_upload: true, skip_screenshots: true, precheck_include_in_app_purchases: false,
@@ -109,25 +98,22 @@ platform :android do
   desc "Build the flavor and upload it to the Play beta track. Options: flavor:, bump:"
   lane :beta do |options|
     config = rn_ship_config
-    flavor = ship_flavor(config, options)
-    android = config.android
+    flavor = config.flavor_for(options[:flavor])
 
     rn_ship_android_preflight(flavor: flavor.name)
 
     current = rn_ship_gradle_version
     version = rn_ship_next_version(current_version: current[:version], current_build: current[:build], bump: options[:bump],
                                    **rn_ship_store_state(flavor: flavor.name))
-    rn_ship_gradle_version(**version)
-    git_commit(path: lane_context[SharedValues::RN_SHIP_VERSION_FILES], message: bump_message("Android", version))
+    written = rn_ship_gradle_version(**version)
+    git_commit(path: written[:files], message: bump_message("Android", version))
 
     gradle(task: "bundle", flavor: gradle_flavor(flavor.android["flavor"]), build_type: flavor.android["build_type"],
-           project_dir: config.expand(android["project_dir"]))
+           project_dir: config.expand(config.android["project_dir"]))
     aab = lane_context[SharedValues::GRADLE_AAB_OUTPUT_PATH]
     rn_ship_verify_aab(aab: aab)
 
-    upload_to_play_store(package_name: flavor.android["package_name"], track: android["play"]["track"], aab: aab,
-                         json_key_data: ENV[android["play"]["json_key_env"]], release_status: play_release_status(config),
-                         skip_upload_metadata: true, skip_upload_changelogs: true, skip_upload_images: true, skip_upload_screenshots: true)
+    upload_to_play_store(**play_options(config, flavor), aab: aab)
 
     rn_ship_push_release(branch: flavor.branch, tag: config.beta_tag(platform: :android, flavor: flavor.name, **version))
   end
@@ -135,19 +121,15 @@ platform :android do
   desc "Promote the flavor's latest beta-track build to production. Options: flavor:"
   lane :release do |options|
     config = rn_ship_config
-    flavor = ship_flavor(config, options)
-    ensure_release_branch!(flavor)
-    android = config.android
+    flavor = config.flavor_for(options[:flavor])
+    config.ensure_release_branch!(flavor)
 
     rn_ship_store_state(flavor: flavor.name)
     state = lane_context[SharedValues::RN_SHIP_STORE_STATE]
-    UI.user_error!("Nothing on the #{android['play']['track']} track for #{flavor.android['package_name']} yet") unless state[:beta_build]
+    UI.user_error!("Nothing on the #{config.android['play']['track']} track for #{flavor.android['package_name']} yet") unless state[:beta_build]
 
-    upload_to_play_store(package_name: flavor.android["package_name"], track: android["play"]["track"], track_promote_to: "production",
-                         version_code: state[:beta_build], release_status: play_release_status(config),
-                         json_key_data: ENV[android["play"]["json_key_env"]],
-                         skip_upload_aab: true, skip_upload_apk: true, skip_upload_metadata: true, skip_upload_changelogs: true,
-                         skip_upload_images: true, skip_upload_screenshots: true)
+    upload_to_play_store(**play_options(config, flavor), track_promote_to: "production", version_code: state[:beta_build],
+                         skip_upload_aab: true, skip_upload_apk: true)
 
     push_tag!(config.release_tag(platform: :android, flavor: flavor.name, version: state[:latest_version], build: state[:beta_build]),
               "Android release #{state[:latest_version]} (#{state[:beta_build]})")

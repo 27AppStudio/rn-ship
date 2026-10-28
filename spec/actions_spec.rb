@@ -64,10 +64,10 @@ describe "GitHub composite actions" do
 
     it "decodes base64 split over lines" do
       dest = File.join(@dir, "upload.jks")
-      encoded = [File.binread(AndroidKeys.path("upload.jks"))].pack("m") # 60-column lines
-      _, status = write(encoded, dest, "--base64")
+      keystore = Random.bytes(3000)
+      _, status = write([keystore].pack("m"), dest, "--base64") # 60-column lines
       expect(status).to be_success
-      expect(File.binread(dest)).to eq(File.binread(AndroidKeys.path("upload.jks")))
+      expect(File.binread(dest)).to eq(keystore)
     end
 
     it "refuses an empty secret instead of writing an empty file" do
@@ -81,10 +81,10 @@ describe "GitHub composite actions" do
   describe "cleanup.sh" do
     it "deletes what git doesn't track and restores what it does" do
       Dir.mktmpdir("rn-ship-cleanup") do |dir|
-        Open3.capture2e("git", "init", "-q", chdir: dir)
+        git_init!(dir)
         File.write(File.join(dir, ".env"), "committed\n")
-        Open3.capture2e("git", "add", ".env", chdir: dir)
-        Open3.capture2e("git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "init", chdir: dir)
+        git!(dir, "add", ".env")
+        git!(dir, "commit", "-qm", "init")
         File.write(File.join(dir, ".env"), "SECRET=from-ci\n")
         File.write(File.join(dir, ".env.staging"), "SECRET=x\n")
 

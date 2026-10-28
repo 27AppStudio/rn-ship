@@ -8,7 +8,7 @@ description: Run an rn-ship Android lane (beta or release) with credentials writ
 
 inputs:
   lane:
-    description: beta (build + beta track) or release (promote to production)
+    description: Lane of your Fastfile, e.g. beta (build + beta track) or release (promote to production)
     default: beta
   flavor:
     description: Flavor from rn-ship.yml (default the one deploying from this branch)
@@ -60,13 +60,16 @@ runs:
         EMAIL: ${{ inputs.git-user-email }}
       run: git config user.name "$NAME" && git config user.email "$EMAIL"
 
+    # Only a build needs a JDK and Gradle; release just promotes on Play.
     - uses: actions/setup-java@v6
+      if: inputs.lane != 'release'
       with:
         distribution: temurin
         java-version: ${{ inputs.java-version }}
 
     # Pull requests read the Gradle cache but never write it.
     - uses: gradle/actions/setup-gradle@v6
+      if: inputs.lane != 'release'
       with:
         cache-read-only: ${{ github.event_name == 'pull_request' }}
 
@@ -122,7 +125,6 @@ runs:
         IN_RELEASE_STATUS: ${{ inputs.play-release-status }}
         ABIS: ${{ inputs.abis }}
       run: |
-        case "$LANE" in beta|release) ;; *) echo "::error::lane must be beta or release, got $LANE"; exit 1 ;; esac
         # The credentials go under the names rn-ship.yml gives (validated env var names).
         if [ -f "$RUNNER_TEMP/rn-ship-upload.jks" ]; then
           export "ORG_GRADLE_PROJECT_${PREFIX}_STORE_FILE=$RUNNER_TEMP/rn-ship-upload.jks" \
@@ -133,10 +135,7 @@ runs:
         export "$JSON_KEY_ENV=$IN_JSON_KEY" "$RELEASE_STATUS_ENV=$IN_RELEASE_STATUS"
         unset IN_STORE_PASSWORD IN_KEY_ALIAS IN_KEY_PASSWORD IN_JSON_KEY
         if [ -n "$ABIS" ]; then export ORG_GRADLE_PROJECT_reactNativeArchitectures="$ABIS"; fi
-        if [ "$SELF_HOSTED" = true ]; then export "$SELF_HOSTED_ENV=1"; fi
-        args=("flavor:$FLAVOR")
-        if [ -n "$BUMP" ]; then args+=("bump:$BUMP"); fi
-        bundle exec fastlane android "$LANE" "${args[@]}"
+        "$GITHUB_ACTION_PATH/../scripts/run-lane.sh" android "$LANE" "$FLAVOR"
 
     - name: Remove credentials
       if: always()

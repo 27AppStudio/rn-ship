@@ -34,7 +34,7 @@ module Fastlane
         UI.user_error!("Target(s) #{missing.join(', ')} not in #{File.basename(project)} (it has #{names.join(', ')})") unless missing.empty?
 
         targets.each do |name|
-          configurations = xcode.targets.find { |target| target.name == name }.build_configurations.map(&:name)
+          configurations = find_target!(xcode, name).build_configurations.map(&:name)
           next if configurations.include?(configuration)
 
           UI.user_error!("Target #{name} has no #{configuration} configuration (it has #{configurations.sort.join(', ')})")
@@ -82,7 +82,8 @@ module Fastlane
       def read_xcode_version(project:, target:, configuration:)
         require "xcodeproj"
         settings = build_configuration(Xcodeproj::Project.open(project), target, configuration).build_settings
-        plist = info_plist(project, settings)
+        path = info_plist(project, settings)
+        plist = path ? Xcodeproj::Plist.read_from_path(path) : {}
         {
           version: plist_literal(plist, "CFBundleShortVersionString") || settings["MARKETING_VERSION"],
           build: (plist_literal(plist, "CFBundleVersion") || settings["CURRENT_PROJECT_VERSION"]).to_i
@@ -94,14 +95,14 @@ module Fastlane
       # Writes MARKETING_VERSION / CURRENT_PROJECT_VERSION in every configuration of the app and
       # its extensions (the App Store rejects an extension whose version differs from the app's),
       # and any literal value in their Info.plist files. Plists that reference the build settings
-      # are left alone. Returns the files written.
+      # are left alone. Returns the files written: exactly what to commit, never whatever else
+      # CI touched (Podfile.lock...).
       def write_xcode_version(project:, targets:, version:, build:)
         require "xcodeproj"
         xcode = Xcodeproj::Project.open(project)
         plists = []
         targets.each do |name|
-          target = xcode.targets.find { |candidate| candidate.name == name } || UI.user_error!("Target #{name} not in #{File.basename(project)}")
-          target.build_configurations.each do |configuration|
+          find_target!(xcode, name).build_configurations.each do |configuration|
             configuration.build_settings["MARKETING_VERSION"] = version.to_s
             configuration.build_settings["CURRENT_PROJECT_VERSION"] = build.to_s
             plists << info_plist(project, configuration.build_settings)
@@ -112,16 +113,20 @@ module Fastlane
         written = plists.compact.uniq.select do |path|
           plist = Xcodeproj::Plist.read_from_path(path)
           literals = { "CFBundleShortVersionString" => version.to_s, "CFBundleVersion" => build.to_s }.select { |key, _| plist_literal(plist, key) }
-          Xcodeproj::Plist.write_to_path(plist.merge(literals), path) unless literals.empty?
-          !literals.empty?
+          next false if literals.empty?
+
+          Xcodeproj::Plist.write_to_path(plist.merge(literals), path)
+          true
         end
-        # The files to commit: exactly these, never whatever else CI touched (Podfile.lock...).
         [File.join(project, "project.pbxproj"), *written]
       end
 
+      def find_target!(xcode, name)
+        xcode.targets.find { |target| target.name == name } || UI.user_error!("Target #{name} not in #{File.basename(xcode.path)}")
+      end
+
       def build_configuration(xcode, target_name, configuration)
-        target = xcode.targets.find { |candidate| candidate.name == target_name } || UI.user_error!("Target #{target_name} not in the project")
-        target.build_configurations.find { |candidate| candidate.name == configuration } ||
+        find_target!(xcode, target_name).build_configurations.find { |candidate| candidate.name == configuration } ||
           UI.user_error!("Target #{target_name} has no #{configuration} configuration")
       end
 
@@ -134,9 +139,9 @@ module Fastlane
         File.file?(path) ? path : nil
       end
 
+      # A plist value written out, not a $(BUILD_SETTING) reference.
       def plist_literal(plist, key)
-        plist = Xcodeproj::Plist.read_from_path(plist) if plist.is_a?(String)
-        value = plist && plist[key]
+        value = plist[key]
         value.is_a?(String) && !value.include?("$") ? value : nil
       end
 

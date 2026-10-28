@@ -17,11 +17,8 @@ module Fastlane
         )
         UI.success("Upload key: #{upload_key[:key_alias]} in #{upload_key[:store_file]}")
 
-        env_file = nil
-        if flavor.env_file
-          env_file = Helper::RnShipAndroid.use_env_file!(flavor.env_file, root: config.root, flavor: flavor.name)
-          UI.success("ENVFILE=#{env_file}")
-        end
+        env_file = config.pin_env_file!(flavor)
+        UI.success("ENVFILE=#{env_file}") if env_file
 
         { store_file: upload_key[:store_file], key_alias: upload_key[:key_alias], env_file: env_file }
       end

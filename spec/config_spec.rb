@@ -184,6 +184,49 @@ describe Fastlane::Helper::RnShipConfig do
     end
   end
 
+  describe "#pin_env_file!" do
+    it "pins ENVFILE to the flavor's file, as an absolute path" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "rn-ship.yml"), minimal.sub("branch: main", "branch: main\n    env_file: .env.production"))
+        File.write(File.join(dir, ".env.production"), "API_URL=x\n")
+        loaded = described_class.load(File.join(dir, "rn-ship.yml"))
+        target = {}
+
+        expect(loaded.pin_env_file!(loaded.flavor("production"), env: target)).to eq(File.join(File.realpath(dir), ".env.production")).or eq(File.join(dir, ".env.production"))
+        expect(target["ENVFILE"]).to end_with("/.env.production")
+      end
+    end
+
+    it "refuses to build without it" do
+      flavor = config.flavor("staging")
+      expect { config.pin_env_file!(flavor, env: {}) }
+        .to raise_error(FastlaneCore::Interface::FastlaneError, ".env.staging is missing: the staging build would ship without its config")
+    end
+
+    it "does nothing for a flavor without an env file" do
+      target = {}
+      expect(config_from(minimal).pin_env_file!(config_from(minimal).flavor("production"), env: target)).to be_nil
+      expect(target).to be_empty
+    end
+  end
+
+  describe "#flavor_for / #ensure_release_branch!" do
+    it "prefers the named flavor, else the branch GitHub checked out" do
+      expect(config.flavor_for("prod").name).to eq("prod")
+      expect(config.flavor_for(nil, env: { "GITHUB_REF_NAME" => "staging" }).name).to eq("staging")
+    end
+
+    it "falls back to git outside GitHub Actions" do
+      allow(Fastlane::Actions).to receive(:git_branch).and_return("master")
+      expect(config.flavor_for("", env: {}).name).to eq("prod")
+    end
+
+    it "refuses a release from another branch" do
+      expect { config.ensure_release_branch!(config.flavor("prod"), env: { "GITHUB_REF_NAME" => "staging" }) }
+        .to raise_error(FastlaneCore::Interface::FastlaneError, "prod is released from master, not staging")
+    end
+  end
+
   describe ".load" do
     it "finds rn-ship.yml in a parent directory" do
       Dir.mktmpdir do |dir|

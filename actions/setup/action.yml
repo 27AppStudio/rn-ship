@@ -17,11 +17,11 @@ runs:
       id: pm
       shell: bash
       run: |
-        if [ -f yarn.lock ]; then echo "lockfile=yarn.lock" >> "$GITHUB_OUTPUT"; echo "install=corepack enable && yarn install --immutable" >> "$GITHUB_OUTPUT"
-        elif [ -f pnpm-lock.yaml ]; then echo "lockfile=pnpm-lock.yaml" >> "$GITHUB_OUTPUT"; echo "install=corepack enable && pnpm install --frozen-lockfile" >> "$GITHUB_OUTPUT"
-        elif [ -f package-lock.json ]; then echo "lockfile=package-lock.json" >> "$GITHUB_OUTPUT"; echo "install=npm ci" >> "$GITHUB_OUTPUT"
-        else echo "::error::No yarn.lock, pnpm-lock.yaml or package-lock.json"; exit 1
-        fi
+        for lockfile in yarn.lock pnpm-lock.yaml package-lock.json; do
+          if [ -f "$lockfile" ]; then echo "lockfile=$lockfile" >> "$GITHUB_OUTPUT"; exit 0; fi
+        done
+        echo "::error::No yarn.lock, pnpm-lock.yaml or package-lock.json"
+        exit 1
 
     # Exact key only: installing over another lockfile's node_modules upgrades packages in place,
     # and Yarn can then leave new bin targets non-executable (React Native CLI broke Android
@@ -39,8 +39,13 @@ runs:
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       env:
-        INSTALL: ${{ steps.pm.outputs.install }}
-      run: eval "$INSTALL"
+        LOCKFILE: ${{ steps.pm.outputs.lockfile }}
+      run: |
+        case "$LOCKFILE" in
+          yarn.lock) corepack enable && yarn install --immutable ;;
+          pnpm-lock.yaml) corepack enable && pnpm install --frozen-lockfile ;;
+          package-lock.json) npm ci ;;
+        esac
 
     # Saved right after the install, before any build: react-native-config writes the env
     # file's values into node_modules during the build, and those must never be cached.

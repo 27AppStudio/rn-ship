@@ -11,11 +11,12 @@ module Fastlane
     class RnShipConfig
       FILE_NAME = "rn-ship.yml".freeze
 
-      MATCH_PROFILE_PREFIX = {
-        "appstore" => "AppStore",
-        "adhoc" => "AdHoc",
-        "development" => "Development",
-        "enterprise" => "InHouse"
+      # Per match type: the prefix of the profile names match creates, and gym's export method.
+      MATCH_TYPES = {
+        "appstore" => { profile_prefix: "AppStore", export_method: "app-store" },
+        "adhoc" => { profile_prefix: "AdHoc", export_method: "ad-hoc" },
+        "development" => { profile_prefix: "Development", export_method: "development" },
+        "enterprise" => { profile_prefix: "InHouse", export_method: "enterprise" }
       }.freeze
 
       Flavor = Struct.new(:name, :branch, :env_file, :ios, :android, :tags, keyword_init: true)
@@ -85,6 +86,38 @@ module Fastlane
         flavor(name)
       end
 
+      # The flavor to ship: the one named, else the one deploying from the current branch.
+      def flavor_for(name = nil, env: ENV)
+        name.to_s.empty? ? flavor_for_branch(current_branch(env: env)) : flavor(name)
+      end
+
+      # GitHub Actions can check out a detached HEAD, which git (and fastlane's git_branch, which
+      # knows other CIs' variables but not GitHub's) reports as "HEAD".
+      def current_branch(env: ENV)
+        env["GITHUB_REF_NAME"].to_s.empty? ? Actions.git_branch : env["GITHUB_REF_NAME"]
+      end
+
+      # A release is cut from the branch its flavor deploys from, so the tag lands on what shipped.
+      def ensure_release_branch!(flavor, env: ENV)
+        branch = current_branch(env: env)
+        UI.user_error!("#{flavor.name} is released from #{flavor.branch}, not #{branch}") unless branch == flavor.branch
+      end
+
+      # react-native-config picks an env file by matching the build against its own mapping and
+      # silently falls back to `.env` when nothing matches, which is how a release can ship with
+      # the dev config. Pin the flavor's file and make sure it exists. ENVFILE gets the absolute
+      # path: react-native-config resolves a relative one against the React Native project root
+      # (android/.. on Android), not against rn-ship.yml, so it would point elsewhere whenever the
+      # two differ, as in a monorepo. Its Gradle and Xcode scripts both accept an absolute path.
+      # Returns the path, nil when the flavor has no env file.
+      def pin_env_file!(flavor, env: ENV)
+        return nil unless flavor.env_file
+
+        path = expand(flavor.env_file)
+        UI.user_error!("#{flavor.env_file} is missing: the #{flavor.name} build would ship without its config") unless File.file?(path)
+        env["ENVFILE"] = path
+      end
+
       # Absolute path for a path written relative to rn-ship.yml
       def expand(relative)
         File.expand_path(relative, root)
@@ -104,12 +137,20 @@ module Fastlane
         [bundle_id] + ios["extensions"].map { |extension| bundle_id + extension["bundle_id_suffix"] }
       end
 
+      # The app target followed by every extension target, in ios_app_identifiers' order.
+      def ios_targets
+        [ios["target"]] + ios["extensions"].map { |extension| extension["target"] }
+      end
+
       # [target, profile name] for the app and every extension, e.g.
       # ["App", "match AppStore com.example.app"].
       def ios_signing_targets(flavor)
-        prefix = "match #{MATCH_PROFILE_PREFIX.fetch(ios['match']['type'])}"
-        targets = [ios["target"]] + ios["extensions"].map { |extension| extension["target"] }
-        targets.zip(ios_app_identifiers(flavor)).map { |target, identifier| [target, "#{prefix} #{identifier}"] }
+        prefix = "match #{MATCH_TYPES.fetch(ios['match']['type'])[:profile_prefix]}"
+        ios_targets.zip(ios_app_identifiers(flavor)).map { |target, identifier| [target, "#{prefix} #{identifier}"] }
+      end
+
+      def ios_export_method
+        MATCH_TYPES.fetch(ios["match"]["type"])[:export_method]
       end
 
       private

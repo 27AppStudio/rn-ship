@@ -4,10 +4,6 @@ require_relative "../helper/android"
 
 module Fastlane
   module Actions
-    module SharedValues
-      RN_SHIP_VERSION_FILES = :RN_SHIP_VERSION_FILES
-    end
-
     class RnShipGradleVersionAction < Action
       def self.run(params)
         path = params[:gradle_file] || begin
@@ -20,9 +16,9 @@ module Fastlane
         return current if params[:version].nil? && params[:build].nil?
 
         updated = { version: params[:version] || current[:version], build: params[:build] || current[:build] }
-        lane_context[SharedValues::RN_SHIP_VERSION_FILES] = Helper::RnShipAndroid.write_gradle_version(path, **updated)
+        files = Helper::RnShipAndroid.write_gradle_version(path, **updated)
         UI.message("#{File.basename(path)}: #{current[:version]} (#{current[:build]}) → #{updated[:version]} (#{updated[:build]})")
-        updated
+        updated.merge(files: files)
       end
 
       def self.description
@@ -42,12 +38,8 @@ module Fastlane
         ]
       end
 
-      def self.output
-        [["RN_SHIP_VERSION_FILES", "The files a write changed, for git_commit(path:)"]]
-      end
-
       def self.return_value
-        "A hash { version:, build: } after any change"
+        "A hash { version:, build: }; a write adds files: (what it changed, for git_commit(path:))"
       end
 
       def self.authors

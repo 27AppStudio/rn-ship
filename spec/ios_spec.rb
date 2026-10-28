@@ -169,7 +169,9 @@ describe "iOS actions" do
     end
 
     it "writes the app and every extension, in every configuration" do
-      expect(run_lane("rn_ship_xcode_version(flavor: 'staging', version: '1.1.0', build: 5, config_path: #{config_path})")).to eq(version: "1.1.0", build: 5)
+      expect(run_lane("rn_ship_xcode_version(flavor: 'staging', version: '1.1.0', build: 5, config_path: #{config_path})")).to eq(
+        version: "1.1.0", build: 5, files: [File.join(@project, "project.pbxproj"), File.join(@root, "ios", "App", "Info.plist")]
+      )
 
       %w[App NotificationService].product(%w[Debug Release StagingRelease]).each do |target, configuration|
         expect(IosProject.settings(@project, target, configuration)).to include("MARKETING_VERSION" => "1.1.0", "CURRENT_PROJECT_VERSION" => "5")
@@ -180,7 +182,7 @@ describe "iOS actions" do
     end
 
     it "changes only what it's given" do
-      expect(run_lane("rn_ship_xcode_version(flavor: 'staging', build: 9, config_path: #{config_path})")).to eq(version: "1.0.0", build: 9)
+      expect(run_lane("rn_ship_xcode_version(flavor: 'staging', build: 9, config_path: #{config_path})")).to include(version: "1.0.0", build: 9)
     end
   end
 

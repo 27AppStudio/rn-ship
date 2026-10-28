@@ -67,20 +67,6 @@ describe Fastlane::Helper::RnShipAndroid do
     end
   end
 
-  describe ".use_env_file!" do
-    it "pins ENVFILE to the flavor's file, as an absolute path" do
-      File.write(File.join(@dir, ".env.staging"), "API_URL=x\n")
-      target = {}
-      described_class.use_env_file!(".env.staging", root: @dir, flavor: "staging", env: target)
-      expect(target).to eq("ENVFILE" => File.join(@dir, ".env.staging"))
-    end
-
-    it "refuses to build without it" do
-      expect { described_class.use_env_file!(".env.staging", root: @dir, flavor: "staging", env: {}) }
-        .to raise_error(FastlaneCore::Interface::FastlaneError, ".env.staging is missing: the staging build would ship without its config")
-    end
-  end
-
   describe ".verify_upload_signature!" do
     let(:upload_key) { { store_file: AndroidKeys.path("upload.jks"), key_alias: "upload", store_password: "upload-pass" } }
     let(:debug_keystores) { [AndroidKeys.path("debug.keystore"), File.join(@dir, "no-such.keystore")] }
@@ -227,7 +213,9 @@ describe "Android actions" do
 
   it "rn_ship_gradle_version reads, then writes only what it's given" do
     expect(run_lane("rn_ship_gradle_version(config_path: #{config_path})")).to eq(version: "2.0.0", build: 9)
-    expect(run_lane("rn_ship_gradle_version(build: 10, config_path: #{config_path})")).to eq(version: "2.0.0", build: 10)
+    expect(run_lane("rn_ship_gradle_version(build: 10, config_path: #{config_path})")).to eq(
+      version: "2.0.0", build: 10, files: [File.join(@root, "android", "app", "build.gradle")]
+    )
     expect(File.read(File.join(@root, "android", "app", "build.gradle"))).to eq("versionCode 10\nversionName \"2.0.0\"\n")
   end
 end

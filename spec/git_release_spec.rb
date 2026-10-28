@@ -10,13 +10,6 @@ describe Fastlane::Helper::RnShipGitRelease do
     end
   end
 
-  def git!(cwd, *args)
-    out, status = Open3.capture2e("git", *args, chdir: cwd)
-    raise "git #{args.join(' ')} failed in #{cwd}:\n#{out}" unless status.success?
-
-    out.strip
-  end
-
   def commit!(cwd, file, content, message)
     File.write(File.join(cwd, file), content)
     git!(cwd, "add", file)
@@ -26,10 +19,7 @@ describe Fastlane::Helper::RnShipGitRelease do
   def clone!(name)
     path = File.join(@dir, name)
     git!(@dir, "clone", "-q", "--branch", "staging", origin, path)
-    git!(path, "config", "user.name", "CI")
-    git!(path, "config", "user.email", "ci@example.com")
-    git!(path, "config", "commit.gpgsign", "false")
-    git!(path, "config", "tag.gpgsign", "false")
+    GitHelpers::IDENTITY.each { |key, value| git!(path, "config", key, value) }
     path
   end
 
@@ -38,10 +28,7 @@ describe Fastlane::Helper::RnShipGitRelease do
     path = File.join(@dir, "origin.git")
     git!(@dir, "init", "-q", "--bare", "-b", "staging", path)
     seed = File.join(@dir, "seed")
-    git!(@dir, "init", "-q", "-b", "staging", seed)
-    git!(seed, "config", "user.name", "Seed")
-    git!(seed, "config", "user.email", "seed@example.com")
-    git!(seed, "config", "commit.gpgsign", "false")
+    git_init!(seed, "-b", "staging")
     commit!(seed, "version.txt", "1.0.0+1\n", "init")
     commit!(seed, "README.md", "app\n", "readme")
     git!(seed, "push", "-q", path, "staging")

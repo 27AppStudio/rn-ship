@@ -61,21 +61,6 @@ module Fastlane
         { store_file: store_file, key_alias: values["#{prefix}_KEY_ALIAS"], store_password: values["#{prefix}_STORE_PASSWORD"] }
       end
 
-      # react-native-config picks an env file by matching the Gradle task name against
-      # envConfigFiles, and silently falls back to `.env` when nothing matches, which is how a
-      # release can ship with the dev config. Name the file explicitly and make sure it exists.
-      #
-      # ENVFILE is set to the absolute path: react-native-config resolves a relative one against
-      # the React Native project root (android/.. on Android), not against rn-ship.yml, so a
-      # relative path would point elsewhere whenever the two differ, as in a monorepo. Both its
-      # Gradle and its Xcode script accept an absolute path as is.
-      def use_env_file!(env_file, root:, flavor:, env: ENV)
-        path = File.expand_path(env_file, root)
-        UI.user_error!("#{env_file} is missing: the #{flavor} build would ship without its config") unless File.file?(path)
-
-        env["ENVFILE"] = path
-      end
-
       # SHA-256 of the certificate that signed an AAB/APK/JAR, nil when it isn't signed.
       def signer_fingerprint(archive)
         UI.user_error!("#{archive} doesn't exist") unless File.file?(archive)

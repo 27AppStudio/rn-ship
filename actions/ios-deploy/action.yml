@@ -8,7 +8,7 @@ description: Run an rn-ship iOS lane (beta or release) with credentials written 
 
 inputs:
   lane:
-    description: beta (build + TestFlight) or release (submit for review)
+    description: Lane of your Fastfile, e.g. beta (build + TestFlight) or release (submit for review)
     default: beta
   flavor:
     description: Flavor from rn-ship.yml (default the one deploying from this branch)
@@ -137,14 +137,10 @@ runs:
         SELF_HOSTED: ${{ runner.environment == 'self-hosted' }}
         MATCH_PASSWORD: ${{ inputs.match-password }}
       run: |
-        case "$LANE" in beta|release) ;; *) echo "::error::lane must be beta or release, got $LANE"; exit 1 ;; esac
         # The credentials go under the names rn-ship.yml gives (validated env var names).
         export "$KEY_ID_ENV=$IN_KEY_ID" "$ISSUER_ID_ENV=$IN_ISSUER_ID" "$KEY_CONTENT_ENV=$IN_KEY"
         unset IN_KEY_ID IN_ISSUER_ID IN_KEY
-        if [ "$SELF_HOSTED" = true ]; then export "$SELF_HOSTED_ENV=1"; fi
-        args=("flavor:$FLAVOR")
-        if [ -n "$BUMP" ]; then args+=("bump:$BUMP"); fi
-        bundle exec fastlane ios "$LANE" "${args[@]}"
+        "$GITHUB_ACTION_PATH/../scripts/run-lane.sh" ios "$LANE" "$FLAVOR"
 
     - name: Remove credentials
       if: always()

@@ -17,19 +17,13 @@ module Fastlane
           workspace: config.expand(ios["workspace"]),
           scheme: flavor.ios.fetch("scheme"),
           configuration: flavor.ios.fetch("configuration"),
-          targets: config.ios_signing_targets(flavor.name).map(&:first)
+          targets: config.ios_targets
         )
-        UI.success("Project: scheme #{flavor.ios['scheme']}, #{flavor.ios['configuration']}, targets #{config.ios_signing_targets(flavor.name).map(&:first).join(', ')}")
+        UI.success("Project: scheme #{flavor.ios['scheme']}, #{flavor.ios['configuration']}, targets #{config.ios_targets.join(', ')}")
 
         Helper::RnShipIos.ensure_no_stale_envfile!
-        env_file = nil
-        if flavor.env_file
-          # Same pinning as on Android: react-native-config's Xcode script accepts an absolute path.
-          env_file = config.expand(flavor.env_file)
-          UI.user_error!("#{flavor.env_file} is missing: the #{flavor.name} build would ship without its config") unless File.file?(env_file)
-          ENV["ENVFILE"] = env_file
-          UI.success("ENVFILE=#{env_file}")
-        end
+        env_file = config.pin_env_file!(flavor)
+        UI.success("ENVFILE=#{env_file}") if env_file
 
         # Fail now rather than after the archive if the upload can't authenticate.
         Helper::RnShipStoreState.app_store_connect_api_key_options(ios["app_store_connect"]) unless params[:skip_api_key_check]

@@ -4,10 +4,6 @@ require_relative "../helper/ios"
 
 module Fastlane
   module Actions
-    module SharedValues
-      RN_SHIP_VERSION_FILES = :RN_SHIP_VERSION_FILES
-    end
-
     class RnShipXcodeVersionAction < Action
       def self.run(params)
         config = lane_context[SharedValues::RN_SHIP_CONFIG] || Helper::RnShipConfig.load(params[:config_path])
@@ -19,10 +15,9 @@ module Fastlane
         return current if params[:version].nil? && params[:build].nil?
 
         updated = { version: params[:version] || current[:version], build: params[:build] || current[:build] }
-        lane_context[SharedValues::RN_SHIP_VERSION_FILES] =
-          Helper::RnShipIos.write_xcode_version(project: project, targets: config.ios_signing_targets(flavor.name).map(&:first), **updated)
+        files = Helper::RnShipIos.write_xcode_version(project: project, targets: config.ios_targets, **updated)
         UI.message("#{File.basename(project)}: #{current[:version]} (#{current[:build]}) → #{updated[:version]} (#{updated[:build]})")
-        updated
+        updated.merge(files: files)
       end
 
       def self.description
@@ -46,12 +41,8 @@ module Fastlane
         ]
       end
 
-      def self.output
-        [["RN_SHIP_VERSION_FILES", "The files a write changed, for git_commit(path:)"]]
-      end
-
       def self.return_value
-        "A hash { version:, build: } after any change"
+        "A hash { version:, build: }; a write adds files: (what it changed, for git_commit(path:))"
       end
 
       def self.authors
@@ -66,7 +57,8 @@ module Fastlane
         [
           'current = rn_ship_xcode_version(flavor: "staging")
           next_version = rn_ship_next_version(current_version: current[:version], current_build: current[:build], **rn_ship_store_state(flavor: "staging"))
-          rn_ship_xcode_version(flavor: "staging", **next_version)'
+          written = rn_ship_xcode_version(flavor: "staging", **next_version)
+          git_commit(path: written[:files], message: "Release #{next_version[:version]}")'
         ]
       end
 

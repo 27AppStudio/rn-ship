@@ -10,11 +10,7 @@ platform, flavor_name = ARGV
 abort("usage: credential-names.rb <ios|android> [flavor]") unless %w[ios android].include?(platform)
 
 config = Fastlane::Helper::RnShipConfig.load
-flavor = if flavor_name.to_s.empty?
-           config.flavor_for_branch(ENV["GITHUB_REF_NAME"].to_s.empty? ? `git rev-parse --abbrev-ref HEAD`.strip : ENV["GITHUB_REF_NAME"])
-         else
-           config.flavor(flavor_name)
-         end
+flavor = config.flavor_for(flavor_name)
 
 outputs = {
   "flavor" => flavor.name,

@@ -7,22 +7,13 @@ require "tmpdir"
 describe "templates/fastlane/Fastfile" do
   TEMPLATE = File.expand_path("../templates/fastlane/Fastfile", __dir__)
 
-  def git!(dir, *args)
-    output, status = Open3.capture2e("git", *args, chdir: dir)
-    raise "git #{args.join(' ')}: #{output}" unless status.success?
-
-    output.strip
-  end
-
   around do |example|
     Dir.mktmpdir("rn-ship-template") do |dir|
       @origin = File.join(dir, "origin.git")
       @app = File.join(dir, "app")
       git!(dir, "init", "-q", "--bare", "-b", "staging", @origin)
       FileUtils.mkdir_p(@app)
-      git!(@app, "init", "-q", "-b", "staging")
-      { "user.name" => "CI", "user.email" => "ci@example.com", "commit.gpgsign" => "false", "tag.gpgsign" => "false" }
-        .each { |key, value| git!(@app, "config", key, value) }
+      git_init!(@app, "-b", "staging")
 
       IosProject.create(@app)
       FileUtils.mkdir_p(File.join(@app, "android", "app"))
@@ -74,7 +65,10 @@ describe "templates/fastlane/Fastfile" do
     })
     @calls = Hash.new { |hash, key| hash[key] = [] }
     { MatchAction: nil, BuildAppAction: "/tmp/App.ipa", UploadToTestflightAction: nil, DeliverAction: nil, UploadToPlayStoreAction: nil }.each do |action, result|
-      allow(Fastlane::Actions.const_get(action)).to receive(:run) { |params| @calls[action] << params.values(ask: false) && result }
+      allow(Fastlane::Actions.const_get(action)).to receive(:run) do |params|
+        @calls[action] << params.values(ask: false)
+        result
+      end
     end
     allow(Fastlane::Actions::GradleAction).to receive(:run) do |params|
       @calls[:GradleAction] << params.values(ask: false)
@@ -111,7 +105,7 @@ describe "templates/fastlane/Fastfile" do
       match = @calls[:MatchAction].first
       expect(match).to include(type: "appstore", app_identifier: ["com.example.app.staging", "com.example.app.staging.NotificationService"], team_id: "TEAM123456")
       expect(@calls[:BuildAppAction].first).to include(scheme: "staging", configuration: "StagingRelease", export_method: "app-store")
-      expect(@calls[:UploadToTestflightAction].first).to include(api_key: { key_id: "K" }, skip_submission: true)
+      expect(@calls[:UploadToTestflightAction].first).to include(skip_submission: true)
     end
 
     it "leaves the CI-only signing edits out of the pushed commit" do

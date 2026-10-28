@@ -223,7 +223,7 @@ describe Fastlane::Helper::RnShipConfig do
 
     it "refuses a release from another branch" do
       expect { config.ensure_release_branch!(config.flavor("prod"), env: { "GITHUB_REF_NAME" => "staging" }) }
-        .to raise_error(FastlaneCore::Interface::FastlaneError, "prod is released from master, not staging")
+        .to raise_error(FastlaneCore::Interface::FastlaneError, "prod ships from master, not staging")
     end
   end
 

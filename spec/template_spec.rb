@@ -122,6 +122,11 @@ describe "templates/fastlane/Fastfile" do
       expect(origin("log", "-1", "--format=%s", "staging")).to eq("chore(release): iOS 1.2.0 (1) [skip ci]")
     end
 
+    it "refuses to ship a flavor from another branch, which would push this branch's commits to it" do
+      expect { lane(:ios, :beta, flavor: "production") }.to raise_error(FastlaneCore::Interface::FastlaneError, "production ships from main, not staging")
+      expect(git!(@app, "log", "-1", "--format=%s")).to eq("init")
+    end
+
     it "fails before committing anything when the preflight fails" do
       File.delete(File.join(@app, ".env.staging"))
       expect { lane(:ios, :beta) }.to raise_error(FastlaneCore::Interface::FastlaneError, /.env.staging is missing/)
@@ -175,7 +180,7 @@ describe "templates/fastlane/Fastfile" do
 
     it "refuses to release a flavor from another branch" do
       store(latest_version: "1.1.0", latest_build: 5, live_version: nil, monotonic_build: false)
-      expect { lane(:ios, :release, flavor: "production") }.to raise_error(FastlaneCore::Interface::FastlaneError, "production is released from main, not staging")
+      expect { lane(:ios, :release, flavor: "production") }.to raise_error(FastlaneCore::Interface::FastlaneError, "production ships from main, not staging")
       expect(@calls[:DeliverAction]).to be_empty
     end
   end

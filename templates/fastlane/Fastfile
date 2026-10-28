@@ -46,6 +46,8 @@ platform :ios do
   lane :beta do |options|
     config = rn_ship_config
     flavor = config.flavor_for(options[:flavor])
+    # The bump commit is pushed to the flavor's branch: never from another branch's commits.
+    config.ensure_release_branch!(flavor)
     ios = config.ios
 
     # Everything that can fail cheaply fails before anything is committed or built.
@@ -99,6 +101,8 @@ platform :android do
   lane :beta do |options|
     config = rn_ship_config
     flavor = config.flavor_for(options[:flavor])
+    # The bump commit is pushed to the flavor's branch: never from another branch's commits.
+    config.ensure_release_branch!(flavor)
 
     rn_ship_android_preflight(flavor: flavor.name)
 

@@ -97,10 +97,12 @@ module Fastlane
         env["GITHUB_REF_NAME"].to_s.empty? ? Actions.git_branch : env["GITHUB_REF_NAME"]
       end
 
-      # A release is cut from the branch its flavor deploys from, so the tag lands on what shipped.
+      # A flavor ships from its own branch: a beta pushes its bump commit there, and a release
+      # tags what shipped from it. Running either from another branch would push or tag that
+      # branch's commits instead.
       def ensure_release_branch!(flavor, env: ENV)
         branch = current_branch(env: env)
-        UI.user_error!("#{flavor.name} is released from #{flavor.branch}, not #{branch}") unless branch == flavor.branch
+        UI.user_error!("#{flavor.name} ships from #{flavor.branch}, not #{branch}") unless branch == flavor.branch
       end
 
       # react-native-config picks an env file by matching the build against its own mapping and

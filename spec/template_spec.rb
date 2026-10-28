@@ -105,7 +105,7 @@ describe "templates/fastlane/Fastfile" do
       match = @calls[:MatchAction].first
       expect(match).to include(type: "appstore", app_identifier: ["com.example.app.staging", "com.example.app.staging.NotificationService"], team_id: "TEAM123456")
       expect(@calls[:BuildAppAction].first).to include(scheme: "staging", configuration: "StagingRelease", export_method: "app-store")
-      expect(@calls[:UploadToTestflightAction].first).to include(skip_submission: true)
+      expect(@calls[:UploadToTestflightAction].first).to include(app_identifier: "com.example.app.staging", skip_submission: true)
     end
 
     it "leaves the CI-only signing edits out of the pushed commit" do

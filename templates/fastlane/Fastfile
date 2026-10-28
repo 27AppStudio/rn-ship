@@ -11,7 +11,9 @@
 # (beta only: start a new version instead of the next build).
 
 # [skip ci]: the bump commit must not start another deploy when pushed with a token that
-# triggers workflows (a deploy key or a PAT; GITHUB_TOKEN pushes never do).
+# triggers workflows (a deploy key or a PAT; GITHUB_TOKEN pushes never do). Pushing with
+# GITHUB_TOKEN? Drop it: a branch promoted by fast-forward whose head is a bump commit would
+# then skip its deploy.
 def bump_message(platform, version)
   "chore(release): #{platform} #{version[:version]} (#{version[:build]}) [skip ci]"
 end
@@ -69,7 +71,9 @@ platform :ios do
     build_app(workspace: config.expand(ios["workspace"]), scheme: flavor.ios["scheme"], configuration: flavor.ios["configuration"],
               export_method: config.ios_export_method, archive_path: signing[:archive_path])
     # The App Store Connect key rn_ship_store_state loaded is picked up from the lane context.
-    upload_to_testflight(skip_waiting_for_build_processing: true, skip_submission: true)
+    # app_identifier explicitly: pilot otherwise falls back to the Appfile's, which names one app
+    # for every flavor and would send a staging build to the production app record.
+    upload_to_testflight(app_identifier: flavor.ios["bundle_id"], skip_waiting_for_build_processing: true, skip_submission: true)
 
     rn_ship_push_release(branch: flavor.branch, tag: config.beta_tag(platform: :ios, flavor: flavor.name, **version))
   end

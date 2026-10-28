@@ -5,6 +5,7 @@ EAS-style CI/CD for **bare React Native** apps: a fastlane plugin plus GitHub co
 > **Work in progress.** v0.1 is being extracted from the pipeline [Splitify](https://splitify.cc) ships to TestFlight and Google Play with. Each part below is marked shipped or planned.
 
 - [Status](#status)
+- [Getting started](#getting-started)
 - [Architecture](#architecture)
   - [Layers](#layers)
   - [Design principles](#design-principles)
@@ -34,10 +35,31 @@ EAS-style CI/CD for **bare React Native** apps: a fastlane plugin plus GitHub co
 | `rn_ship_android_preflight` | Before the build: refuses to start without the upload key properties and keystore, and pins `ENVFILE` to the flavor's env file. | Shipped |
 | `rn_ship_verify_aab` | After the build: refuses to ship a bundle that isn't signed with exactly the upload key, and names the debug keystore when that's the culprit. | Shipped |
 | `rn_ship_gradle_version` | Reads / writes `versionName` and `versionCode` in `build.gradle(.kts)`, refusing per-flavor overrides that would keep their own value. | Shipped |
+| `rn_ship_xcode_version` | Reads / writes the version and build number of the app and every extension, in build settings and literal Info.plist values. No agvtool. | Shipped |
 | Play listing | Assembles store copy into a `supply` folder with Play's character limits checked. | Planned |
-| Reference lanes | `beta`, `release`, `bump_version` Fastfiles you copy and own. | Planned |
-| GitHub composite actions | `setup`, `ios-deploy`, `android-deploy`, `select-runner`, `notify`. | Planned |
+| Reference lanes | [`templates/fastlane/Fastfile`](templates/fastlane/Fastfile): `ios` / `android` `beta` and `release`, built from the actions above. You copy it and own it. | Shipped |
+| GitHub composite actions | `setup`, `ios-deploy`, `android-deploy`, `notify`, and an [example workflow](examples/deploy.yml). | Shipped |
+| Self-hosted runner tooling | `select-runner` (use a self-hosted Mac when it's online, GitHub-hosted otherwise) and a runner manager script. | Planned |
 | `init` scaffolder | Adds flavors, schemes and configurations to an existing project (`eas build:configure`). | Planned (phase 2) |
+
+## Getting started
+
+1. **Configure flavors** in your project first (schemes and configurations in Xcode, `productFlavors` in Gradle, one env file each). rn-ship reads them; it doesn't create them yet.
+2. **Add `rn-ship.yml`** at the repo root ([format](#rn-shipyml)).
+3. **Add fastlane and the plugin** from [`templates/`](templates): `Gemfile` at the root, `fastlane/Pluginfile`, and `fastlane/Fastfile` (the reference lanes, yours to change).
+4. **Try it locally**, read-only first: `bundle exec fastlane run rn_ship_config` validates the file, then `bundle exec fastlane ios beta flavor:staging` from a machine that can sign.
+5. **Add the workflow**: copy [`examples/deploy.yml`](examples/deploy.yml) to `.github/workflows/` and add the secrets below.
+
+| Secret | Used by | What |
+|---|---|---|
+| `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY` | `ios-deploy` | An App Store Connect API key; the last one is the `.p8` file's content |
+| `MATCH_PASSWORD`, `MATCH_SSH_KEY` | `ios-deploy` | match's passphrase, and a deploy key for the certificates repo when it's cloned over SSH |
+| `ANDROID_UPLOAD_KEYSTORE_BASE64`, `ANDROID_UPLOAD_STORE_PASSWORD`, `ANDROID_UPLOAD_KEY_ALIAS`, `ANDROID_UPLOAD_KEY_PASSWORD` | `android-deploy` | The Play upload key (`base64 -i upload.jks`) |
+| `PLAY_SERVICE_ACCOUNT_JSON` | `android-deploy` | A Google Play service account key with release permissions |
+| `ENV_STAGING`, `ENV_PRODUCTION` | both | Env file contents, when they aren't committed |
+| `DEPLOY_WEBHOOK` | `notify` | Optional Discord or Slack incoming webhook |
+
+The actions export each secret under the env var name `rn-ship.yml` gives it, so the lanes and the workflow never disagree. The bump commit and tag are pushed with the workflow's `GITHUB_TOKEN` (`permissions: contents: write`); a branch protection rule on a flavor branch must let it push.
 
 ## Architecture
 
@@ -109,7 +131,7 @@ sequenceDiagram
   participant Store as TestFlight / Play
   participant Git as origin
 
-  GH->>Lane: push to staging → ios-deploy / android-deploy (planned)
+  GH->>Lane: push to staging → ios-deploy / android-deploy
   Lane->>RS: rn_ship_config
   RS-->>Lane: flavor_for_branch("staging") → scheme, bundle id, env file
   Lane->>RS: Android: rn_ship_android_preflight (upload key, ENVFILE)
@@ -126,7 +148,7 @@ sequenceDiagram
   Lane->>RS: rn_ship_push_release
   RS->>Git: rebase onto origin/staging, tag, push --atomic
   Lane->>RS: iOS: rn_ship_ci_signing_cleanup (after_all / error)
-  GH->>GH: remove credentials · notify (planned)
+  GH->>GH: remove credentials · notify
 ```
 
 The order is deliberate. The preflight runs first, so a missing upload key or env file fails the job before anything is committed. The version is resolved from the store *before* the build, so the binary carries the right number. The bump commit and its tag are pushed *after* the upload, so a tag always points at something that is really on the store.
@@ -239,12 +261,14 @@ rn-ship.yml is invalid:
 |---|---|---|
 | Secret committed in config | The config only accepts env var *names* (`/\A[A-Z_][A-Z0-9_]*\z/`). Anything else fails validation. | Shipped |
 | Secret echoed into CI logs | Errors on credential fields never print the value (only its type, for non-strings). | Shipped |
-| Secret expanded by the shell | Composite actions write secrets through `env:` + `printf`, never `${{ secrets.X }}` inside `run:`, where `$`, backticks and quotes in the value are expanded. | Planned |
+| Secret expanded by the shell | No `run:` block in the actions contains a `${{ }}` expression (a spec enforces it): secrets reach the shell through `env:` and files are written with `printf`, so `$`, backticks and quotes in a value are never expanded. | Shipped |
 | CI creating or revoking certificates | fastlane's `setup_ci` already makes match read-only on hosted runners. `rn_ship_ci_signing` sets it on every path, including self-hosted Macs where `setup_ci` doesn't run. | Shipped |
 | Taking over a developer's login keychain (self-hosted Mac) | A dedicated non-default keychain with a random password, first in the search list, deleted in `after_all` / `error`; one left by a crashed run is replaced. Archives go to `$RUNNER_TEMP`. | Shipped |
 | Signing settings drifting in the checked-in project | `rn_ship_ios_signing` rewrites them from `rn-ship.yml` on every build, after the preflight proves every target exists (`update_code_signing_settings` skips unknown targets silently). | Shipped |
 | A stale `/tmp/envfile` swapping the config | react-native-config's Xcode script reads it before `ENVFILE`. The iOS preflight refuses to build while it exists. | Shipped |
-| Credentials left on a persistent runner | Cleanup with `if: always()` removes keys, env files, the generated `.env` and `ios/tmp.xcconfig`. | Planned |
+| Credentials left on a persistent runner | Secrets are written mode 600 under `$RUNNER_TEMP`, never `~/.ssh`. Cleanup with `if: always()` removes keys, env files, the generated `.env`, `ios/tmp.xcconfig` and react-native-config's `GeneratedDotEnv.m`, and restores rather than deletes files git tracks. | Shipped |
+| Env values cached into `node_modules` | The `setup` action saves its cache right after installing, before any build writes the env file's values into `node_modules`. | Shipped |
+| A bump commit starting another deploy | Bump commits carry `[skip ci]`, in case they're pushed with a token that triggers workflows. | Shipped |
 | Expired API key read as "nothing live" | The live version is read through Spaceship, where "nothing live" is `nil` and an API failure raises. | Shipped |
 | Shipping a debug-signed AAB | The first AAB permanently enrolls its key on Play, and React Native's template signs release builds with the public debug key when the upload key is missing. The build refuses to start without the upload key, and the AAB's certificate must match the upload key's exactly, so it isn't enough to merely differ from the debug key. | Shipped |
 | Store password in the process list | keytool gets the password through `-storepass:env`, never as an argument `ps` would show. | Shipped |
@@ -261,6 +285,7 @@ rn-ship.yml is invalid:
 | `eas build` + `eas submit` | `beta` lane: TestFlight / Play internal track |
 | Submit for review / promote | `release` lane: `deliver` review / Play promotion |
 | `eas build:configure` | `init` scaffolder (phase 2) |
+| EAS Workflows | [`examples/deploy.yml`](examples/deploy.yml) with the composite actions |
 | EAS Update, build cache | Out of scope. Pair with [Rock](https://www.rockjs.dev)'s remote build cache rather than rebuilding it. |
 
 ### Repository layout
@@ -292,8 +317,11 @@ rn-ship/
 │           ├── rn_ship_ios_signing.rb
 │           └── rn_ship_ci_signing.rb  # rn_ship_ci_signing + rn_ship_ci_signing_cleanup
 ├── spec/                              # RSpec, fixtures/splitify.yml
-├── templates/                         # planned: reference Fastfiles
-├── actions/                           # planned: GitHub composite actions
+├── templates/                         # Gemfile, fastlane/Pluginfile, fastlane/Fastfile (reference lanes)
+├── actions/
+│   ├── setup/ ios-deploy/ android-deploy/ notify/   # composite actions
+│   └── scripts/                       # their logic: write-secret, cleanup, notify, credential-names
+├── examples/deploy.yml                # the workflow to copy
 ├── scripts/ci-runner.sh               # planned: self-hosted Mac runner manager
 └── example/                           # planned: RN CLI app with dev/staging/prod
 ```
@@ -310,6 +338,8 @@ The gem and the GitHub actions share one repo and one version tag, so `fastlane-
 | Store APIs | Play tracks as recorded-shape doubles through the pure summary; Spaceship and Supply stubbed at their boundary, including "the edit is aborted even when listing fails" | `rn_ship_store_state` |
 | Xcode project | A real `.xcodeproj` built with the xcodeproj gem (app + extension, three configurations, shared and user schemes); fastlane's real `update_code_signing_settings` runs against it | `rn_ship_ios_preflight`, `rn_ship_ios_signing` |
 | Signing | Real keystores (upload, debug, unrelated) generated with keytool and real bundles signed with jarsigner, once per run. Specs never read the developer's `~/.gradle`. | `rn_ship_verify_aab`: upload, debug, other key, unsigned, wrong password |
+| Reference lanes | The template Fastfile run end to end against a real git repo with a bare origin, the Xcode fixture and a Gradle file; only store and compiler calls are stubbed | bump commit holds only version files, CI signing edits never pushed, preflight fails before any commit, debug-signed AAB never uploaded, release branch guard |
+| Composite actions | Every `run:` block is shellchecked and must not contain `${{ }}`; the scripts run for real (a secret full of `$`, backticks and quotes is written byte for byte); actionlint checks the example workflow against the actions' inputs; `notify` runs on a real runner in CI | `actions_spec.rb`, CI `actions` job |
 | Real stores | Read-only run against Splitify's App Store Connect and Google Play apps, compared with fastlane's built-ins and Splitify's own lanes | manual, before each release |
 | Plugin loading | `fastlane run …` from a project with a `Pluginfile`, the way a consumer loads it | manual, before each release |
 | Real-world config | Splitify's actual setup as a fixture (irregular schemes, an app extension, custom tags) | `spec/fixtures/splitify.yml` |

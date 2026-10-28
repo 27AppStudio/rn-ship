@@ -1,0 +1,91 @@
+# Copy to .github/workflows/deploy.yml. Every push to a flavor's branch (rn-ship.yml) ships a
+# beta to TestFlight and the Play beta track; "Run workflow" can bump the version or run the
+# release lanes.
+name: Deploy
+
+on:
+  push:
+    branches: [staging, main]
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: beta (build + upload) or release (submit / promote)
+        type: choice
+        options: [beta, release]
+        default: beta
+      bump:
+        description: Start a new version (beta only)
+        type: choice
+        options: [none, patch, minor, major]
+        default: none
+      platform:
+        type: choice
+        options: [all, ios, android]
+        default: all
+
+# The lanes push the version-bump commit and its tag.
+permissions:
+  contents: write
+
+jobs:
+  ios:
+    if: ${{ inputs.platform != 'android' }}
+    runs-on: macos-15
+    timeout-minutes: 90
+    # One deploy per branch and platform at a time: two would read the same build number.
+    concurrency:
+      group: ios-deploy-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: 27AppStudio/rn-ship/actions/setup@v0.1.0
+      - uses: 27AppStudio/rn-ship/actions/ios-deploy@v0.1.0
+        with:
+          lane: ${{ inputs.lane || 'beta' }}
+          bump: ${{ inputs.bump != 'none' && inputs.bump || '' }}
+          env-file: ${{ github.ref_name == 'main' && secrets.ENV_PRODUCTION || secrets.ENV_STAGING }}
+          app-store-connect-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          app-store-connect-issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          app-store-connect-key: ${{ secrets.APP_STORE_CONNECT_KEY }}
+          match-password: ${{ secrets.MATCH_PASSWORD }}
+          match-ssh-key: ${{ secrets.MATCH_SSH_KEY }}
+          xcode-version: '26'
+      - uses: 27AppStudio/rn-ship/actions/notify@v0.1.0
+        if: ${{ always() }}
+        with:
+          webhook-url: ${{ secrets.DEPLOY_WEBHOOK }}
+          status: ${{ job.status }}
+          title: iOS ${{ inputs.lane || 'beta' }}
+
+  android:
+    if: ${{ inputs.platform != 'ios' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    concurrency:
+      group: android-deploy-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: 27AppStudio/rn-ship/actions/setup@v0.1.0
+      - uses: 27AppStudio/rn-ship/actions/android-deploy@v0.1.0
+        with:
+          lane: ${{ inputs.lane || 'beta' }}
+          bump: ${{ inputs.bump != 'none' && inputs.bump || '' }}
+          env-file: ${{ github.ref_name == 'main' && secrets.ENV_PRODUCTION || secrets.ENV_STAGING }}
+          upload-keystore-base64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          upload-store-password: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          upload-key-alias: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          upload-key-password: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          play-service-account-json: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          play-release-status: ${{ vars.PLAY_RELEASE_STATUS }}
+          abis: armeabi-v7a,arm64-v8a
+      - uses: 27AppStudio/rn-ship/actions/notify@v0.1.0
+        if: ${{ always() }}
+        with:
+          webhook-url: ${{ secrets.DEPLOY_WEBHOOK }}
+          status: ${{ job.status }}
+          title: Android ${{ inputs.lane || 'beta' }}

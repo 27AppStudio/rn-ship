@@ -28,3 +28,25 @@ jobs:
           git config --global user.name "CI"
           git config --global user.email "ci@example.com"
       - run: bundle exec rspec
+
+  actions:
+    name: composite actions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install actionlint
+        run: bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+      # Once as published, once against ./actions so every input passed is checked against
+      # the action's own definition.
+      - name: Lint the example workflow
+        run: |
+          ./actionlint examples/deploy.yml
+          sed 's|27AppStudio/rn-ship/actions/\([a-z-]*\)@v[0-9.]*|./actions/\1|' examples/deploy.yml > .github/workflows/example-local.yml
+          ./actionlint .github/workflows/example-local.yml
+      - name: notify (dry run on a real runner)
+        uses: ./actions/notify
+        env:
+          NOTIFY_PRINT: "1"
+        with:
+          status: success
+          title: rn-ship CI

@@ -1,0 +1,146 @@
+name: rn-ship Android deploy
+description: Run an rn-ship Android lane (beta or release) with credentials written safely and removed afterwards
+
+# The calling job checks out with fetch-depth: 0, runs rn-ship/actions/setup first, holds
+# `permissions: contents: write`, and sets a concurrency group so two deploys of one branch
+# never resolve the same versionCode. An Android build doesn't need macOS: ubuntu runners are
+# cheaper and run in parallel with the iOS job.
+
+inputs:
+  lane:
+    description: beta (build + beta track) or release (promote to production)
+    default: beta
+  flavor:
+    description: Flavor from rn-ship.yml (default the one deploying from this branch)
+    default: ''
+  bump:
+    description: major, minor or patch to start a new version (beta only)
+    default: ''
+  env-file:
+    description: Content of the flavor's env file, if it isn't committed
+    default: ''
+  upload-keystore-base64:
+    description: The upload keystore, base64-encoded (beta only)
+    default: ''
+  upload-store-password:
+    description: Upload keystore password
+    default: ''
+  upload-key-alias:
+    description: Upload key alias
+    default: ''
+  upload-key-password:
+    description: Upload key password
+    default: ''
+  play-service-account-json:
+    description: Google Play service account key (JSON content)
+    required: true
+  play-release-status:
+    description: Release status for new Play releases (draft until the app is published once)
+    default: ''
+  java-version:
+    description: JDK for Gradle
+    default: '17'
+  abis:
+    description: reactNativeArchitectures for the store build, e.g. armeabi-v7a,arm64-v8a (empty keeps gradle.properties)
+    default: ''
+  git-user-name:
+    description: Author of the version-bump commit
+    default: github-actions[bot]
+  git-user-email:
+    description: Email of that author
+    default: 41898282+github-actions[bot]@users.noreply.github.com
+
+runs:
+  using: composite
+  steps:
+    - name: Git identity
+      shell: bash
+      env:
+        NAME: ${{ inputs.git-user-name }}
+        EMAIL: ${{ inputs.git-user-email }}
+      run: git config user.name "$NAME" && git config user.email "$EMAIL"
+
+    - uses: actions/setup-java@v6
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+
+    # Pull requests read the Gradle cache but never write it.
+    - uses: gradle/actions/setup-gradle@v6
+      with:
+        cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+    - uses: ruby/setup-ruby@v1
+      if: runner.environment == 'github-hosted'
+      with:
+        bundler-cache: true
+
+    - name: Install gems (self-hosted)
+      if: runner.environment == 'self-hosted'
+      shell: bash
+      run: bundle install --jobs 4
+
+    - name: Read rn-ship.yml
+      id: names
+      shell: bash
+      env:
+        FLAVOR: ${{ inputs.flavor }}
+      run: bundle exec ruby "$GITHUB_ACTION_PATH/../scripts/credential-names.rb" android "$FLAVOR"
+
+    - name: Write env file
+      if: inputs.env-file != ''
+      shell: bash
+      env:
+        SECRET_CONTENT: ${{ inputs.env-file }}
+        DEST: ${{ steps.names.outputs.env_file }}
+      run: |
+        if [ -z "$DEST" ]; then echo "::error::env-file was given but the flavor has no env_file in rn-ship.yml"; exit 1; fi
+        "$GITHUB_ACTION_PATH/../scripts/write-secret.sh" "$DEST"
+
+    - name: Write upload keystore
+      if: inputs.upload-keystore-base64 != ''
+      shell: bash
+      env:
+        SECRET_CONTENT: ${{ inputs.upload-keystore-base64 }}
+      run: '"$GITHUB_ACTION_PATH/../scripts/write-secret.sh" "$RUNNER_TEMP/rn-ship-upload.jks" --base64'
+
+    - name: fastlane android ${{ inputs.lane }}
+      shell: bash
+      env:
+        LANE: ${{ inputs.lane }}
+        FLAVOR: ${{ steps.names.outputs.flavor }}
+        BUMP: ${{ inputs.bump }}
+        PREFIX: ${{ steps.names.outputs.upload_key_prefix }}
+        JSON_KEY_ENV: ${{ steps.names.outputs.json_key_env }}
+        RELEASE_STATUS_ENV: ${{ steps.names.outputs.release_status_env }}
+        SELF_HOSTED_ENV: ${{ steps.names.outputs.self_hosted_env }}
+        SELF_HOSTED: ${{ runner.environment == 'self-hosted' }}
+        IN_STORE_PASSWORD: ${{ inputs.upload-store-password }}
+        IN_KEY_ALIAS: ${{ inputs.upload-key-alias }}
+        IN_KEY_PASSWORD: ${{ inputs.upload-key-password }}
+        IN_JSON_KEY: ${{ inputs.play-service-account-json }}
+        IN_RELEASE_STATUS: ${{ inputs.play-release-status }}
+        ABIS: ${{ inputs.abis }}
+      run: |
+        case "$LANE" in beta|release) ;; *) echo "::error::lane must be beta or release, got $LANE"; exit 1 ;; esac
+        # The credentials go under the names rn-ship.yml gives (validated env var names).
+        if [ -f "$RUNNER_TEMP/rn-ship-upload.jks" ]; then
+          export "ORG_GRADLE_PROJECT_${PREFIX}_STORE_FILE=$RUNNER_TEMP/rn-ship-upload.jks" \
+                 "ORG_GRADLE_PROJECT_${PREFIX}_STORE_PASSWORD=$IN_STORE_PASSWORD" \
+                 "ORG_GRADLE_PROJECT_${PREFIX}_KEY_ALIAS=$IN_KEY_ALIAS" \
+                 "ORG_GRADLE_PROJECT_${PREFIX}_KEY_PASSWORD=$IN_KEY_PASSWORD"
+        fi
+        export "$JSON_KEY_ENV=$IN_JSON_KEY" "$RELEASE_STATUS_ENV=$IN_RELEASE_STATUS"
+        unset IN_STORE_PASSWORD IN_KEY_ALIAS IN_KEY_PASSWORD IN_JSON_KEY
+        if [ -n "$ABIS" ]; then export ORG_GRADLE_PROJECT_reactNativeArchitectures="$ABIS"; fi
+        if [ "$SELF_HOSTED" = true ]; then export "$SELF_HOSTED_ENV=1"; fi
+        args=("flavor:$FLAVOR")
+        if [ -n "$BUMP" ]; then args+=("bump:$BUMP"); fi
+        bundle exec fastlane android "$LANE" "${args[@]}"
+
+    - name: Remove credentials
+      if: always()
+      shell: bash
+      env:
+        ENV_FILE: ${{ steps.names.outputs.env_file }}
+      run: '"$GITHUB_ACTION_PATH/../scripts/cleanup.sh" "$ENV_FILE" .env "$RUNNER_TEMP/rn-ship-upload.jks"'

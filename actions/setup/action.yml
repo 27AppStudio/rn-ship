@@ -1,0 +1,54 @@
+name: rn-ship setup
+description: Set up Node.js and install JavaScript dependencies with a cache that never mixes lockfiles
+
+inputs:
+  node-version-file:
+    description: File holding the Node.js version
+    default: .nvmrc
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v6
+      with:
+        node-version-file: ${{ inputs.node-version-file }}
+
+    - name: Detect package manager
+      id: pm
+      shell: bash
+      run: |
+        if [ -f yarn.lock ]; then echo "lockfile=yarn.lock" >> "$GITHUB_OUTPUT"; echo "install=corepack enable && yarn install --immutable" >> "$GITHUB_OUTPUT"
+        elif [ -f pnpm-lock.yaml ]; then echo "lockfile=pnpm-lock.yaml" >> "$GITHUB_OUTPUT"; echo "install=corepack enable && pnpm install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+        elif [ -f package-lock.json ]; then echo "lockfile=package-lock.json" >> "$GITHUB_OUTPUT"; echo "install=npm ci" >> "$GITHUB_OUTPUT"
+        else echo "::error::No yarn.lock, pnpm-lock.yaml or package-lock.json"; exit 1
+        fi
+
+    # Exact key only: installing over another lockfile's node_modules upgrades packages in place,
+    # and Yarn can then leave new bin targets non-executable (React Native CLI broke Android
+    # autolinking that way in Splitify). Bump the v-prefix to drop a poisoned cache.
+    - name: Restore node_modules
+      id: cache
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          **/node_modules
+          .yarn/install-state.gz
+        key: rn-ship-v1-${{ runner.os }}-${{ hashFiles(steps.pm.outputs.lockfile) }}-${{ hashFiles('**/package.json', '!**/node_modules/**') }}-${{ hashFiles('patches/**') }}
+
+    - name: Install dependencies
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        INSTALL: ${{ steps.pm.outputs.install }}
+      run: eval "$INSTALL"
+
+    # Saved right after the install, before any build: react-native-config writes the env
+    # file's values into node_modules during the build, and those must never be cached.
+    - name: Save node_modules
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v5
+      with:
+        path: |
+          **/node_modules
+          .yarn/install-state.gz
+        key: ${{ steps.cache.outputs.cache-primary-key }}

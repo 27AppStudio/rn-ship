@@ -1,0 +1,158 @@
+name: rn-ship iOS deploy
+description: Run an rn-ship iOS lane (beta or release) with credentials written safely and removed afterwards
+
+# The calling job checks out with fetch-depth: 0, runs rn-ship/actions/setup first, holds
+# `permissions: contents: write`, and sets a concurrency group so two deploys of one branch
+# never resolve the same build number. Composite actions can't read `secrets`: pass them as
+# inputs. Every secret reaches the shell through `env:`, never inside `run:`.
+
+inputs:
+  lane:
+    description: beta (build + TestFlight) or release (submit for review)
+    default: beta
+  flavor:
+    description: Flavor from rn-ship.yml (default the one deploying from this branch)
+    default: ''
+  bump:
+    description: major, minor or patch to start a new version (beta only)
+    default: ''
+  env-file:
+    description: Content of the flavor's env file, if it isn't committed
+    default: ''
+  app-store-connect-key-id:
+    description: App Store Connect API key ID
+    required: true
+  app-store-connect-issuer-id:
+    description: App Store Connect issuer ID
+    required: true
+  app-store-connect-key:
+    description: Content of the App Store Connect .p8 key
+    required: true
+  match-password:
+    description: Passphrase of the match certificates repo
+    default: ''
+  match-ssh-key:
+    description: Private deploy key for a match repo cloned over SSH
+    default: ''
+  match-ssh-host:
+    description: Host of that repo, for known_hosts
+    default: github.com
+  xcode-version:
+    description: Xcode to select on hosted runners, and to require on self-hosted ones (e.g. 26)
+    default: ''
+  git-user-name:
+    description: Author of the version-bump commit
+    default: github-actions[bot]
+  git-user-email:
+    description: Email of that author
+    default: 41898282+github-actions[bot]@users.noreply.github.com
+
+runs:
+  using: composite
+  steps:
+    - name: Git identity
+      shell: bash
+      env:
+        NAME: ${{ inputs.git-user-name }}
+        EMAIL: ${{ inputs.git-user-email }}
+      run: git config user.name "$NAME" && git config user.email "$EMAIL"
+
+    - uses: ruby/setup-ruby@v1
+      if: runner.environment == 'github-hosted'
+      with:
+        bundler-cache: true
+
+    - name: Install gems (self-hosted)
+      if: runner.environment == 'self-hosted'
+      shell: bash
+      run: bundle install --jobs 4
+
+    - name: Read rn-ship.yml
+      id: names
+      shell: bash
+      env:
+        FLAVOR: ${{ inputs.flavor }}
+      run: bundle exec ruby "$GITHUB_ACTION_PATH/../scripts/credential-names.rb" ios "$FLAVOR"
+
+    - uses: maxim-lobanov/setup-xcode@v1
+      if: inputs.xcode-version != '' && runner.environment == 'github-hosted'
+      with:
+        xcode-version: ${{ inputs.xcode-version }}
+
+    - name: Check Xcode (self-hosted)
+      if: inputs.xcode-version != '' && runner.environment == 'self-hosted'
+      shell: bash
+      env:
+        WANTED: ${{ inputs.xcode-version }}
+      run: |
+        actual=$(xcodebuild -version | awk 'NR==1 { print $2 }')
+        case "$actual" in
+          "$WANTED"|"$WANTED".*) echo "Xcode $actual" ;;
+          *) echo "::error::Xcode $WANTED required on this runner, found $actual"; exit 1 ;;
+        esac
+
+    - name: Install pods
+      if: inputs.lane == 'beta'
+      shell: bash
+      env:
+        IOS_DIR: ${{ steps.names.outputs.ios_dir }}
+      run: cd "$IOS_DIR" && bundle exec pod install
+
+    - name: Write env file
+      if: inputs.env-file != ''
+      shell: bash
+      env:
+        SECRET_CONTENT: ${{ inputs.env-file }}
+        DEST: ${{ steps.names.outputs.env_file }}
+      run: |
+        if [ -z "$DEST" ]; then echo "::error::env-file was given but the flavor has no env_file in rn-ship.yml"; exit 1; fi
+        "$GITHUB_ACTION_PATH/../scripts/write-secret.sh" "$DEST"
+
+    # Key and known_hosts live in RUNNER_TEMP, never ~/.ssh: on a self-hosted runner that is
+    # the developer's own SSH directory.
+    - name: Match SSH key
+      if: inputs.match-ssh-key != ''
+      shell: bash
+      env:
+        SECRET_CONTENT: ${{ inputs.match-ssh-key }}
+        HOST: ${{ inputs.match-ssh-host }}
+      run: |
+        "$GITHUB_ACTION_PATH/../scripts/write-secret.sh" "$RUNNER_TEMP/rn-ship-match-key"
+        ssh-keyscan "$HOST" > "$RUNNER_TEMP/rn-ship-known-hosts" 2> /dev/null
+        echo "GIT_SSH_COMMAND=ssh -i $RUNNER_TEMP/rn-ship-match-key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/rn-ship-known-hosts" >> "$GITHUB_ENV"
+
+    - name: fastlane ios ${{ inputs.lane }}
+      shell: bash
+      env:
+        LANE: ${{ inputs.lane }}
+        FLAVOR: ${{ steps.names.outputs.flavor }}
+        BUMP: ${{ inputs.bump }}
+        IN_KEY_ID: ${{ inputs.app-store-connect-key-id }}
+        IN_ISSUER_ID: ${{ inputs.app-store-connect-issuer-id }}
+        IN_KEY: ${{ inputs.app-store-connect-key }}
+        KEY_ID_ENV: ${{ steps.names.outputs.key_id_env }}
+        ISSUER_ID_ENV: ${{ steps.names.outputs.issuer_id_env }}
+        KEY_CONTENT_ENV: ${{ steps.names.outputs.key_content_env }}
+        SELF_HOSTED_ENV: ${{ steps.names.outputs.self_hosted_env }}
+        SELF_HOSTED: ${{ runner.environment == 'self-hosted' }}
+        MATCH_PASSWORD: ${{ inputs.match-password }}
+      run: |
+        case "$LANE" in beta|release) ;; *) echo "::error::lane must be beta or release, got $LANE"; exit 1 ;; esac
+        # The credentials go under the names rn-ship.yml gives (validated env var names).
+        export "$KEY_ID_ENV=$IN_KEY_ID" "$ISSUER_ID_ENV=$IN_ISSUER_ID" "$KEY_CONTENT_ENV=$IN_KEY"
+        unset IN_KEY_ID IN_ISSUER_ID IN_KEY
+        if [ "$SELF_HOSTED" = true ]; then export "$SELF_HOSTED_ENV=1"; fi
+        args=("flavor:$FLAVOR")
+        if [ -n "$BUMP" ]; then args+=("bump:$BUMP"); fi
+        bundle exec fastlane ios "$LANE" "${args[@]}"
+
+    - name: Remove credentials
+      if: always()
+      shell: bash
+      env:
+        ENV_FILE: ${{ steps.names.outputs.env_file }}
+        IOS_DIR: ${{ steps.names.outputs.ios_dir }}
+      run: |
+        "$GITHUB_ACTION_PATH/../scripts/cleanup.sh" "$ENV_FILE" .env "${IOS_DIR:+$IOS_DIR/tmp.xcconfig}" \
+          "$RUNNER_TEMP/rn-ship-match-key" "$RUNNER_TEMP/rn-ship-known-hosts" \
+          node_modules/react-native-config/ios/ReactNativeConfig/GeneratedDotEnv.m

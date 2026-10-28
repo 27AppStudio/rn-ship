@@ -1,0 +1,24 @@
+name: rn-ship notify
+description: Post a deploy status to a Discord- or Slack-compatible webhook; never fails the job
+
+inputs:
+  webhook-url:
+    description: Incoming webhook URL (a secret); empty skips the notification
+    default: ''
+  status:
+    description: Usually job.status
+    required: true
+  title:
+    description: What ran, e.g. "iOS beta"
+    default: ${{ github.workflow }}
+
+runs:
+  using: composite
+  steps:
+    - name: Notify
+      shell: bash
+      env:
+        WEBHOOK_URL: ${{ inputs.webhook-url }}
+        STATUS: ${{ inputs.status }}
+        TITLE: ${{ inputs.title }}
+      run: '"$GITHUB_ACTION_PATH/../scripts/notify.sh" "$STATUS" "$TITLE"'

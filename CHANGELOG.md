@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Composite actions `setup`, `ios-deploy`, `android-deploy`, `notify` and `examples/deploy.yml`. Secrets reach the shell only through `env:` (enforced by a spec), are written mode 600 and removed with `if: always()`; credentials are exported under the env var names from `rn-ship.yml`; the node_modules cache is saved before any build.
+- `templates/`: reference Fastfile (`ios`/`android` `beta` and `release`), Pluginfile and Gemfile.
+- `rn_ship_xcode_version`; `bump:` on `rn_ship_next_version`; version actions record the files they wrote (`RN_SHIP_VERSION_FILES`).
 - `rn_ship_ios_preflight`, `rn_ship_ci_signing`, `rn_ship_ci_signing_cleanup`, `rn_ship_ios_signing`: iOS signing on CI. Targets, configuration and shared scheme checked against the real project before anything runs; a stale `/tmp/envfile` refused; a dedicated non-default keychain on self-hosted Macs; match read-only on every CI path; signing and bundle ids written from `rn-ship.yml` for the app and every extension.
 - `rn_ship_android_preflight`, `rn_ship_verify_aab`, `rn_ship_gradle_version`: Android guards. No build without the upload key; no upload unless the AAB is signed with exactly that key (keytool reads the password from an env var); `ENVFILE` pinned to the flavor's file as an absolute path; one literal `versionCode`/`versionName` in `defaultConfig`, per-flavor overrides refused.
 - `rn_ship_store_state`: reads TestFlight / App Store or Google Play for a flavor and returns the inputs of `rn_ship_next_version`. "Nothing live" is `nil` while API failures still raise; a new app has no build 0; Play's edit is always aborted.

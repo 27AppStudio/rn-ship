@@ -109,7 +109,31 @@ describe Fastlane::Helper::RnShipVersioning do
   end
 end
 
+describe "Fastlane::Helper::RnShipVersioning.apply_bump" do
+  it "bumps the store-aligned version and restarts the build on iOS" do
+    resolved = Fastlane::Helper::RnShipVersioning.resolve_next_version(
+      current_version: "1.2.8", current_build: 4, latest_version: "1.2.8", latest_build: 4, live_version: "1.2.8"
+    )
+    expect(Fastlane::Helper::RnShipVersioning.apply_bump(resolved, type: "minor")).to eq(version: "1.3.0", build: 1)
+  end
+
+  it "keeps counting versionCodes on Google Play" do
+    expect(Fastlane::Helper::RnShipVersioning.apply_bump({ version: "1.2.6", build: 42 }, type: "major", monotonic_build: true))
+      .to eq(version: "2.0.0", build: 42)
+  end
+end
+
 describe Fastlane::Actions::RnShipNextVersionAction do
+  it "applies a bump after resolving" do
+    expect(run_lane('rn_ship_next_version(current_version: "1.2.0", current_build: 3, latest_version: "1.2.0", latest_build: 5, bump: "minor")'))
+      .to eq(version: "1.3.0", build: 1)
+  end
+
+  it "rejects an unknown bump" do
+    expect { run_lane('rn_ship_next_version(current_version: "1.2.0", current_build: 3, bump: "build")') }
+      .to raise_error(FastlaneCore::Interface::FastlaneError, /bump must be major, minor or patch/)
+  end
+
   it "returns the resolved version and stores it in the lane context" do
     result = run_lane('rn_ship_next_version(current_version: "1.2.6", current_build: 7, latest_version: "1.2.6", latest_build: 7, live_version: "1.2.6", monotonic_build: true)')
 

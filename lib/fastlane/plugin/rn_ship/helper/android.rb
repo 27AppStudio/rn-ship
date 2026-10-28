@@ -123,6 +123,7 @@ module Fastlane
         content = content.sub(VERSION_CODE) { "#{Regexp.last_match[:lead]}#{Integer(build)}#{Regexp.last_match[:tail]}" }
         content = content.sub(VERSION_NAME) { "#{Regexp.last_match[:lead]}#{Regexp.last_match[:quote]}#{version}#{Regexp.last_match[:quote]}" }
         File.write(path, content)
+        [path]
       end
 
       # Exactly one literal: a second one (a productFlavor override) would silently keep its

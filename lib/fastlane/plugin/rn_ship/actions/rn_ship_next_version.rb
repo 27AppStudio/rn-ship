@@ -18,6 +18,9 @@ module Fastlane
           live_version: params[:live_version],
           monotonic_build: params[:monotonic_build]
         )
+        if params[:bump]
+          result = Helper::RnShipVersioning.apply_bump(result, type: params[:bump], monotonic_build: params[:monotonic_build])
+        end
 
         lane_context[SharedValues::RN_SHIP_NEXT_VERSION] = result[:version]
         lane_context[SharedValues::RN_SHIP_NEXT_BUILD] = result[:build]
@@ -45,7 +48,9 @@ module Fastlane
           FastlaneCore::ConfigItem.new(key: :latest_version, description: "Version of the newest beta build on the store, nil if none", type: String, optional: true),
           FastlaneCore::ConfigItem.new(key: :latest_build, description: "Build number of the newest beta build (Play: highest versionCode on any track)", type: Integer, default_value: 0),
           FastlaneCore::ConfigItem.new(key: :live_version, description: "Version currently live on the public store, nil if none", type: String, optional: true),
-          FastlaneCore::ConfigItem.new(key: :monotonic_build, description: "Never reset the build number (Google Play versionCode)", type: Fastlane::Boolean, default_value: false)
+          FastlaneCore::ConfigItem.new(key: :monotonic_build, description: "Never reset the build number (Google Play versionCode)", type: Fastlane::Boolean, default_value: false),
+          FastlaneCore::ConfigItem.new(key: :bump, description: "Also bump the resolved version: major, minor or patch", type: String, optional: true,
+                                       verify_block: proc { |value| UI.user_error!("bump must be major, minor or patch, got #{value.inspect}") unless %w[major minor patch].include?(value) })
         ]
       end
 

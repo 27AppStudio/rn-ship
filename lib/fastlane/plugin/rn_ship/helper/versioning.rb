@@ -62,6 +62,16 @@ module Fastlane
 
         { version: version, build: build }
       end
+
+      # A deliberate version bump on top of the resolved version, which is already aligned to
+      # the store: 1.2.8 live, branch on 1.2.8 -> resolved 1.2.9 -> minor -> 1.3.0. A new
+      # version starts at build 1, except on Google Play where versionCodes keep counting.
+      def apply_bump(result, type:, monotonic_build: false)
+        {
+          version: bump_semver(version: result[:version], type: type),
+          build: monotonic_build ? result[:build] : 1
+        }
+      end
     end
   end
 end

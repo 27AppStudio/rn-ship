@@ -77,6 +77,69 @@ module Fastlane
         ours
       end
 
+      # The version the archive will carry: a literal in the target's Info.plist wins, otherwise
+      # the build setting it references (or that a generated Info.plist uses).
+      def read_xcode_version(project:, target:, configuration:)
+        require "xcodeproj"
+        settings = build_configuration(Xcodeproj::Project.open(project), target, configuration).build_settings
+        plist = info_plist(project, settings)
+        {
+          version: plist_literal(plist, "CFBundleShortVersionString") || settings["MARKETING_VERSION"],
+          build: (plist_literal(plist, "CFBundleVersion") || settings["CURRENT_PROJECT_VERSION"]).to_i
+        }.tap do |result|
+          UI.user_error!("No version for #{target} (#{configuration}): set MARKETING_VERSION in its build settings") unless result[:version]
+        end
+      end
+
+      # Writes MARKETING_VERSION / CURRENT_PROJECT_VERSION in every configuration of the app and
+      # its extensions (the App Store rejects an extension whose version differs from the app's),
+      # and any literal value in their Info.plist files. Plists that reference the build settings
+      # are left alone. Returns the files written.
+      def write_xcode_version(project:, targets:, version:, build:)
+        require "xcodeproj"
+        xcode = Xcodeproj::Project.open(project)
+        plists = []
+        targets.each do |name|
+          target = xcode.targets.find { |candidate| candidate.name == name } || UI.user_error!("Target #{name} not in #{File.basename(project)}")
+          target.build_configurations.each do |configuration|
+            configuration.build_settings["MARKETING_VERSION"] = version.to_s
+            configuration.build_settings["CURRENT_PROJECT_VERSION"] = build.to_s
+            plists << info_plist(project, configuration.build_settings)
+          end
+        end
+        xcode.save
+
+        written = plists.compact.uniq.select do |path|
+          plist = Xcodeproj::Plist.read_from_path(path)
+          literals = { "CFBundleShortVersionString" => version.to_s, "CFBundleVersion" => build.to_s }.select { |key, _| plist_literal(plist, key) }
+          Xcodeproj::Plist.write_to_path(plist.merge(literals), path) unless literals.empty?
+          !literals.empty?
+        end
+        # The files to commit: exactly these, never whatever else CI touched (Podfile.lock...).
+        [File.join(project, "project.pbxproj"), *written]
+      end
+
+      def build_configuration(xcode, target_name, configuration)
+        target = xcode.targets.find { |candidate| candidate.name == target_name } || UI.user_error!("Target #{target_name} not in the project")
+        target.build_configurations.find { |candidate| candidate.name == configuration } ||
+          UI.user_error!("Target #{target_name} has no #{configuration} configuration")
+      end
+
+      # INFOPLIST_FILE is relative to the folder holding the .xcodeproj ($(SRCROOT)).
+      def info_plist(project, settings)
+        file = settings["INFOPLIST_FILE"].to_s.sub(%r{\A\$[({]SRCROOT[)}]/}, "")
+        return nil if file.empty?
+
+        path = File.expand_path(file, File.dirname(project))
+        File.file?(path) ? path : nil
+      end
+
+      def plist_literal(plist, key)
+        plist = Xcodeproj::Plist.read_from_path(plist) if plist.is_a?(String)
+        value = plist && plist[key]
+        value.is_a?(String) && !value.include?("$") ? value : nil
+      end
+
       def keychain_path(name)
         File.expand_path("~/Library/Keychains/#{name}-db")
       end

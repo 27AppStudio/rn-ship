@@ -2,31 +2,6 @@ require "fileutils"
 require "tmpdir"
 require "xcodeproj"
 
-# A real Xcode project: an app and a notification extension, Debug / Release / StagingRelease,
-# a shared "staging" scheme and a user-only "local" scheme.
-module IosProject
-  def self.create(root)
-    path = File.join(root, "ios", "App.xcodeproj")
-    FileUtils.mkdir_p(File.join(root, "ios", "App.xcworkspace"))
-    project = Xcodeproj::Project.new(path)
-    app = project.new_target(:application, "App", :ios, "15.0")
-    extension = project.new_target(:app_extension, "NotificationService", :ios, "15.0")
-    project.add_build_configuration("StagingRelease", :release)
-    [app, extension].each { |target| target.add_build_configuration("StagingRelease", :release) }
-    project.root_object.attributes["TargetAttributes"] = [app, extension].to_h { |target| [target.uuid, { "CreatedOnToolsVersion" => "16.0" }] }
-    project.save
-
-    scheme = Xcodeproj::XCScheme.new
-    scheme.add_build_target(app)
-    scheme.save_as(path, "staging", true)
-    scheme.save_as(path, "local", false)
-    path
-  end
-
-  def self.settings(path, target, configuration)
-    Xcodeproj::Project.open(path).targets.find { |t| t.name == target }.build_configurations.find { |c| c.name == configuration }.build_settings
-  end
-end
 
 describe Fastlane::Helper::RnShipIos do
   around do |example|
@@ -181,6 +156,31 @@ describe "iOS actions" do
       expect(extension).to include("PROVISIONING_PROFILE_SPECIFIER" => "match AppStore com.example.app.staging.NotificationService",
                                    "PRODUCT_BUNDLE_IDENTIFIER" => "com.example.app.staging.NotificationService")
       expect(IosProject.settings(@project, "App", "Release")).not_to include("PROVISIONING_PROFILE_SPECIFIER")
+    end
+  end
+
+  describe "rn_ship_xcode_version" do
+    def plist(name)
+      Xcodeproj::Plist.read_from_path(File.join(@root, "ios", name, "Info.plist"))
+    end
+
+    it "reads the literal from Info.plist and the build from the build settings" do
+      expect(run_lane("rn_ship_xcode_version(flavor: 'staging', config_path: #{config_path})")).to eq(version: "1.0.0", build: 4)
+    end
+
+    it "writes the app and every extension, in every configuration" do
+      expect(run_lane("rn_ship_xcode_version(flavor: 'staging', version: '1.1.0', build: 5, config_path: #{config_path})")).to eq(version: "1.1.0", build: 5)
+
+      %w[App NotificationService].product(%w[Debug Release StagingRelease]).each do |target, configuration|
+        expect(IosProject.settings(@project, target, configuration)).to include("MARKETING_VERSION" => "1.1.0", "CURRENT_PROJECT_VERSION" => "5")
+      end
+      expect(plist("App")).to include("CFBundleShortVersionString" => "1.1.0", "CFBundleVersion" => "$(CURRENT_PROJECT_VERSION)")
+      expect(plist("NotificationService")).not_to include("CFBundleShortVersionString")
+      expect(run_lane("rn_ship_xcode_version(flavor: 'staging', config_path: #{config_path})")).to eq(version: "1.1.0", build: 5)
+    end
+
+    it "changes only what it's given" do
+      expect(run_lane("rn_ship_xcode_version(flavor: 'staging', build: 9, config_path: #{config_path})")).to eq(version: "1.0.0", build: 9)
     end
   end
 

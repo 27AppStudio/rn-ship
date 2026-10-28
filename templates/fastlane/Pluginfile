@@ -1,0 +1,2 @@
+# Loaded by the Gemfile (eval_gemfile). Until 0.1.0 is on RubyGems, use the git source.
+gem "fastlane-plugin-rn_ship", git: "https://github.com/27AppStudio/rn-ship"

@@ -5,6 +5,8 @@ require "fastlane/plugin/rn_ship"
 
 Fastlane.load_actions
 
+Dir[File.join(__dir__, "support", "*.rb")].sort.each { |file| require file }
+
 # Runs a one-off lane so actions go through fastlane's real option parsing.
 def run_lane(body)
   Fastlane::FastFile.new.parse("lane :test do\n#{body}\nend").runner.execute(:test)

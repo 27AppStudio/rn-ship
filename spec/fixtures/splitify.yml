@@ -1,0 +1,48 @@
+# Splitify's real setup: irregular production scheme (Debug/Release), one app extension,
+# Gradle properties under SPLITIFY_UPLOAD_*, and its historical tag formats.
+ios:
+  project: ios/splitify.xcodeproj
+  workspace: ios/splitify.xcworkspace
+  target: splitify
+  team_id: 6T483677NW
+  itc_team_id: 121080038
+  match:
+    git_url: git@github.com:27AppStudio/dtrcert.git
+  extensions:
+    - target: OneSignalNotificationServiceExtension
+      bundle_id_suffix: .OneSignalNotificationServiceExtension
+  app_store_connect:
+    key_id_env: APP_STORE_KEY_ID
+    issuer_id_env: APP_STORE_ISSUER_ID
+    key_path_env: APP_STORE_KEY_PATH
+
+android:
+  upload_key_prefix: SPLITIFY_UPLOAD
+  play:
+    json_key_env: PLAY_SERVICE_ACCOUNT_JSON
+
+flavors:
+  staging:
+    branch: staging
+    env_file: .env.staging
+    ios: { scheme: staging, configuration: StagingRelease, bundle_id: com.dtrteam.splitify.staging }
+    android: { flavor: staging, package_name: com.dtrteam.splitify.staging }
+    tags:
+      ios: v{version}-beta-staging.{build}
+      android: v{version}-android-beta-staging.{build}
+  prod:
+    branch: master
+    env_file: .env.prod
+    ios: { scheme: production, configuration: Release, bundle_id: com.dtrteam.splitify }
+    android: { flavor: prod, package_name: com.dtrteam.splitify }
+    tags:
+      ios: v{version}-beta.{build}
+      android: v{version}-android-beta.{build}
+
+release_tags:
+  ios: v{version}-{build}
+  android: v{version}-android-{build}
+
+ci:
+  self_hosted_env: SPLITIFY_SELF_HOSTED
+  keychain: splitify_ci

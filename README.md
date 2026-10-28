@@ -29,7 +29,9 @@ EAS-style CI/CD for **bare React Native** apps: a fastlane plugin plus GitHub co
 | `rn_ship_push_release` | Rebases the bump commit onto the remote branch, tags it and pushes both with `--atomic`, retrying when the other platform pushed first. | Shipped |
 | `rn_ship_store_state` | Reads what the store already has for a flavor: latest TestFlight build and live App Store version, or Play's beta track, highest versionCode on any track and live production release. Returns exactly the inputs of `rn_ship_next_version`. Read-only. | Shipped |
 | CI signing | A dedicated keychain on self-hosted Macs, read-only match everywhere, signing settings for the app and every extension. | Planned |
-| Android guards | Refuses to build without the upload key, refuses to ship a debug-signed AAB, pins the env file. Also reads/writes the Gradle version. | Planned |
+| `rn_ship_android_preflight` | Before the build: refuses to start without the upload key properties and keystore, and pins `ENVFILE` to the flavor's env file. | Shipped |
+| `rn_ship_verify_aab` | After the build: refuses to ship a bundle that isn't signed with exactly the upload key, and names the debug keystore when that's the culprit. | Shipped |
+| `rn_ship_gradle_version` | Reads / writes `versionName` and `versionCode` in `build.gradle(.kts)`, refusing per-flavor overrides that would keep their own value. | Shipped |
 | Play listing | Assembles store copy into a `supply` folder with Play's character limits checked. | Planned |
 | Reference lanes | `beta`, `release`, `bump_version` Fastfiles you copy and own. | Planned |
 | GitHub composite actions | `setup`, `ios-deploy`, `android-deploy`, `select-runner`, `notify`. | Planned |
@@ -108,19 +110,21 @@ sequenceDiagram
   GH->>Lane: push to staging → ios-deploy / android-deploy (planned)
   Lane->>RS: rn_ship_config
   RS-->>Lane: flavor_for_branch("staging") → scheme, bundle id, env file
+  Lane->>RS: Android: rn_ship_android_preflight (upload key, ENVFILE)
   Lane->>RS: rn_ship_store_state
   RS->>Store: latest beta, live version, highest build (read-only)
   Lane->>RS: rn_ship_next_version
   RS-->>Lane: { version: "1.3.0", build: 14 }
   Lane->>Lane: write version, commit bump
-  Lane->>Lane: signing (planned) · match (read-only) · gym / gradle
+  Lane->>Lane: iOS: signing (planned) · match (read-only) · gym / Android: gradle bundle
+  Lane->>RS: Android: rn_ship_verify_aab
   Lane->>Store: upload (pilot / supply)
   Lane->>RS: rn_ship_push_release
   RS->>Git: rebase onto origin/staging, tag, push --atomic
   GH->>GH: remove credentials · notify (planned)
 ```
 
-The order is deliberate. The version is resolved from the store *before* the build, so the binary carries the right number. The bump commit and its tag are pushed *after* the upload, so a tag always points at something that is really on the store.
+The order is deliberate. The preflight runs first, so a missing upload key or env file fails the job before anything is committed. The version is resolved from the store *before* the build, so the binary carries the right number. The bump commit and its tag are pushed *after* the upload, so a tag always points at something that is really on the store.
 
 ### Versioning model
 
@@ -235,7 +239,9 @@ rn-ship.yml is invalid:
 | Taking over a developer's login keychain (self-hosted Mac) | A dedicated non-default keychain with a random password, first in the search list, deleted in `after_all` / `error`. Archives go to `$RUNNER_TEMP`. | Planned |
 | Credentials left on a persistent runner | Cleanup with `if: always()` removes keys, env files, the generated `.env` and `ios/tmp.xcconfig`. | Planned |
 | Expired API key read as "nothing live" | The live version is read through Spaceship, where "nothing live" is `nil` and an API failure raises. | Shipped |
-| Shipping a debug-signed AAB | The upload key is required, and the AAB's SHA-256 is compared against the debug keystore before upload. The first AAB permanently enrolls its key on Play. | Planned |
+| Shipping a debug-signed AAB | The first AAB permanently enrolls its key on Play, and React Native's template signs release builds with the public debug key when the upload key is missing. The build refuses to start without the upload key, and the AAB's certificate must match the upload key's exactly, so it isn't enough to merely differ from the debug key. | Shipped |
+| Store password in the process list | keytool gets the password through `-storepass:env`, never as an argument `ps` would show. | Shipped |
+| Shipping the wrong env file | react-native-config silently falls back to `.env` when the requested file is missing, and the build still succeeds. The preflight requires the flavor's file and sets `ENVFILE` to its absolute path. | Shipped |
 | Build-only keys inside the app | react-native-config compiles *every* key of the env file into the app. Keep CI credentials out of `.env.*` files and in CI env vars. | documented |
 
 ### Coming from EAS
@@ -264,12 +270,16 @@ rn-ship/
 │       │   ├── config_schema.rb       # pure: SCHEMA + validator
 │       │   ├── config.rb              # RnShipConfig: loading, lookups, tags
 │       │   ├── git_release.rb         # push_release
-│       │   └── store_state.rb         # App Store Connect / Play reads; pure Play track summary
+│       │   ├── store_state.rb         # App Store Connect / Play reads; pure Play track summary
+│       │   └── android.rb             # upload key, signature, ENVFILE, Gradle version
 │       └── actions/
 │           ├── rn_ship_config.rb
 │           ├── rn_ship_next_version.rb
 │           ├── rn_ship_push_release.rb
-│           └── rn_ship_store_state.rb
+│           ├── rn_ship_store_state.rb
+│           ├── rn_ship_android_preflight.rb
+│           ├── rn_ship_verify_aab.rb
+│           └── rn_ship_gradle_version.rb
 ├── spec/                              # RSpec, fixtures/splitify.yml
 ├── templates/                         # planned: reference Fastfiles
 ├── actions/                           # planned: GitHub composite actions
@@ -287,6 +297,7 @@ The gem and the GitHub actions share one repo and one version tag, so `fastlane-
 | Side effects | Against the real thing, locally: temporary bare git repos, a `pre-receive` hook that rejects the first N pushes, a second clone acting as "the other platform" | rebase onto a concurrent push, retry, give up, conflict abort |
 | Action wiring | A real lane parsed by `Fastlane::FastFile`, so option parsing, defaults and `lane_context` are exercised | `rn_ship_next_version`, `rn_ship_config`, `rn_ship_store_state` composed with `rn_ship_next_version` |
 | Store APIs | Play tracks as recorded-shape doubles through the pure summary; Spaceship and Supply stubbed at their boundary, including "the edit is aborted even when listing fails" | `rn_ship_store_state` |
+| Signing | Real keystores (upload, debug, unrelated) generated with keytool and real bundles signed with jarsigner, once per run. Specs never read the developer's `~/.gradle`. | `rn_ship_verify_aab`: upload, debug, other key, unsigned, wrong password |
 | Real stores | Read-only run against Splitify's App Store Connect and Google Play apps, compared with fastlane's built-ins and Splitify's own lanes | manual, before each release |
 | Plugin loading | `fastlane run …` from a project with a `Pluginfile`, the way a consumer loads it | manual, before each release |
 | Real-world config | Splitify's actual setup as a fixture (irregular schemes, an app extension, custom tags) | `spec/fixtures/splitify.yml` |
@@ -343,6 +354,35 @@ flavors:
 | `ci.self_hosted_env` / `ci.keychain` | `RN_SHIP_SELF_HOSTED` / `rn_ship_ci` |
 
 [`spec/fixtures/splitify.yml`](spec/fixtures/splitify.yml) is a complete real-world example.
+
+### Android upload key
+
+`upload_key_prefix` names the Gradle properties your `signingConfigs` read. Set them as `ORG_GRADLE_PROJECT_<name>` on CI, or in `~/.gradle/gradle.properties` locally (rn-ship looks in the same places as Gradle: CI env, then `GRADLE_USER_HOME`, then the project's `gradle.properties`). The snippet below falls back to the debug key when the properties are missing, so local release builds still work. `rn_ship_android_preflight` and `rn_ship_verify_aab` are what keep such a build off the store:
+
+```groovy
+def hasUploadKey = ['MYAPP_UPLOAD_STORE_FILE', 'MYAPP_UPLOAD_STORE_PASSWORD',
+                    'MYAPP_UPLOAD_KEY_ALIAS', 'MYAPP_UPLOAD_KEY_PASSWORD'].every { findProperty(it) }
+
+android {
+    signingConfigs {
+        if (hasUploadKey) {
+            release {
+                storeFile file(findProperty('MYAPP_UPLOAD_STORE_FILE'))   // relative to android/app
+                storePassword findProperty('MYAPP_UPLOAD_STORE_PASSWORD')
+                keyAlias findProperty('MYAPP_UPLOAD_KEY_ALIAS')
+                keyPassword findProperty('MYAPP_UPLOAD_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig hasUploadKey ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+}
+```
+
+`versionCode` and `versionName` must be plain literals in `defaultConfig`: rn-ship rewrites them on every upload.
 
 ## Development
 

@@ -125,6 +125,87 @@ describe "GitHub composite actions" do
     end
   end
 
+  # A `bundle` that records its arguments, working directory and the env it was given.
+  def fake_bundle(dir, config_path: "")
+    bin = File.join(dir, "bin")
+    FileUtils.mkdir_p(bin)
+    File.write(File.join(bin, "bundle"), <<~SH)
+      #!/usr/bin/env bash
+      if [ "$1 $2 $3" = "config get path" ]; then
+        [ -n "#{config_path}" ] && echo "path=#{config_path}"
+        exit 0
+      fi
+      { echo "args: $*"; echo "pwd: $(pwd)"; echo "key: ${ASC_KEY:-}"; echo "self-hosted: ${RN_SHIP_SELF_HOSTED:-}"; } >> "#{dir}/bundle.log"
+    SH
+    File.chmod(0o755, File.join(bin, "bundle"))
+    "#{bin}:#{ENV.fetch('PATH')}"
+  end
+
+  describe "ios-deploy fastlane step" do
+    around { |example| Dir.mktmpdir("rn-ship-step") { |dir| @dir = dir and example.run } }
+
+    let(:step) { YAML.safe_load_file(File.join(ROOT, "actions", "ios-deploy", "action.yml")).dig("runs", "steps").find { |s| s["name"].to_s.start_with?("fastlane ios") } }
+    let(:pem) { "-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMG\n-----END PRIVATE KEY-----" }
+
+    def run_step(key:, fastlane_dir: ".", self_hosted: "false", bump: "")
+      FileUtils.mkdir_p(File.join(@dir, "ios"))
+      env = { "PATH" => fake_bundle(@dir), "GITHUB_ACTION_PATH" => File.join(ROOT, "actions", "ios-deploy"),
+              "LANE" => "beta", "FLAVOR" => "staging", "BUMP" => bump, "FASTLANE_DIR" => fastlane_dir,
+              "IN_KEY_ID" => "K", "IN_ISSUER_ID" => "I", "IN_KEY" => key,
+              "KEY_ID_ENV" => "ASC_KEY_ID", "ISSUER_ID_ENV" => "ASC_ISSUER", "KEY_CONTENT_ENV" => "ASC_KEY",
+              "SELF_HOSTED_ENV" => "RN_SHIP_SELF_HOSTED", "SELF_HOSTED" => self_hosted }
+      output, status = Open3.capture2e(env, "bash", "-eo", "pipefail", "-c", step["run"], chdir: @dir)
+      raise output unless status.success?
+
+      File.read(File.join(@dir, "bundle.log"))
+    end
+
+    it "exports a raw .p8 key under the configured name and runs the lane" do
+      log = run_step(key: pem)
+      expect(log).to include("args: exec fastlane ios beta flavor:staging\n", "key: #{pem}")
+    end
+
+    it "decodes a base64-encoded key" do
+      expect(run_step(key: [pem].pack("m"))).to include("key: #{pem}")
+    end
+
+    it "runs from fastlane-dir, passes bump: and flags a self-hosted runner" do
+      log = run_step(key: pem, fastlane_dir: "ios", self_hosted: "true", bump: "minor")
+      expect(log).to include("args: exec fastlane ios beta flavor:staging bump:minor", "pwd: #{File.realpath(File.join(@dir, 'ios'))}", "self-hosted: 1")
+    end
+  end
+
+  describe "bundle-install.sh" do
+    around do |example|
+      Dir.mktmpdir("rn-ship-bundle") do |dir|
+        @dir = dir
+        git_init!(File.join(dir, "repo"))
+        example.run
+      end
+    end
+
+    def install(config_path: "")
+      env = { "PATH" => fake_bundle(@dir, config_path: config_path), "RUNNER_TOOL_CACHE" => File.join(@dir, "tool-cache"),
+              "GITHUB_REPOSITORY" => "me/app", "GITHUB_ENV" => File.join(@dir, "github_env") }
+      output, status = Open3.capture2e(env, File.join(SCRIPTS, "bundle-install.sh"), chdir: File.join(@dir, "repo"))
+      raise output unless status.success?
+    end
+
+    it "links a pinned vendor/bundle into the tool cache and keeps it out of git" do
+      install(config_path: "vendor/bundle")
+      link = File.join(@dir, "repo", "vendor", "bundle")
+      expect(File.symlink?(link)).to be(true)
+      expect(File.readlink(link)).to eq(File.join(@dir, "tool-cache", "rn-ship-bundle", "me-app"))
+      expect(File.read(File.join(@dir, "repo", ".git", "info", "exclude"))).to include("/vendor/bundle")
+      expect(File.read(File.join(@dir, "bundle.log"))).to include("args: install --jobs 4")
+    end
+
+    it "points BUNDLE_PATH at the tool cache otherwise, for later steps too" do
+      install
+      expect(File.read(File.join(@dir, "github_env"))).to eq("BUNDLE_PATH=#{File.join(@dir, 'tool-cache', 'rn-ship-bundle', 'me-app')}\n")
+    end
+  end
+
   describe "credential-names.rb" do
     def names(*args, env: {})
       Dir.mktmpdir("rn-ship-names") do |dir|

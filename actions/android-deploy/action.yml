@@ -16,6 +16,9 @@ inputs:
   bump:
     description: major, minor or patch to start a new version (beta only)
     default: ''
+  fastlane-dir:
+    description: Folder holding the fastlane/ folder (e.g. ios when the Fastfile is ios/fastlane/Fastfile)
+    default: .
   env-file:
     description: Content of the flavor's env file, if it isn't committed
     default: ''
@@ -81,7 +84,7 @@ runs:
     - name: Install gems (self-hosted)
       if: runner.environment == 'self-hosted'
       shell: bash
-      run: bundle install --jobs 4
+      run: '"$GITHUB_ACTION_PATH/../scripts/bundle-install.sh"'
 
     - name: Read rn-ship.yml
       id: names
@@ -113,6 +116,7 @@ runs:
         LANE: ${{ inputs.lane }}
         FLAVOR: ${{ steps.names.outputs.flavor }}
         BUMP: ${{ inputs.bump }}
+        FASTLANE_DIR: ${{ inputs.fastlane-dir }}
         PREFIX: ${{ steps.names.outputs.upload_key_prefix }}
         JSON_KEY_ENV: ${{ steps.names.outputs.json_key_env }}
         RELEASE_STATUS_ENV: ${{ steps.names.outputs.release_status_env }}

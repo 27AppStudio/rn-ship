@@ -16,6 +16,9 @@ inputs:
   bump:
     description: major, minor or patch to start a new version (beta only)
     default: ''
+  fastlane-dir:
+    description: Folder holding the fastlane/ folder (e.g. ios when the Fastfile is ios/fastlane/Fastfile)
+    default: .
   env-file:
     description: Content of the flavor's env file, if it isn't committed
     default: ''
@@ -26,7 +29,7 @@ inputs:
     description: App Store Connect issuer ID
     required: true
   app-store-connect-key:
-    description: Content of the App Store Connect .p8 key
+    description: Content of the App Store Connect .p8 key, as is or base64-encoded
     required: true
   match-password:
     description: Passphrase of the match certificates repo
@@ -65,7 +68,7 @@ runs:
     - name: Install gems (self-hosted)
       if: runner.environment == 'self-hosted'
       shell: bash
-      run: bundle install --jobs 4
+      run: '"$GITHUB_ACTION_PATH/../scripts/bundle-install.sh"'
 
     - name: Read rn-ship.yml
       id: names
@@ -96,7 +99,8 @@ runs:
       shell: bash
       env:
         IOS_DIR: ${{ steps.names.outputs.ios_dir }}
-      run: cd "$IOS_DIR" && bundle exec pod install
+      # A self-hosted Mac's spec repo cache can lag the Podfile.lock: update it only then.
+      run: cd "$IOS_DIR" && { bundle exec pod install || bundle exec pod install --repo-update; }
 
     - name: Write env file
       if: inputs.env-file != ''
@@ -127,6 +131,7 @@ runs:
         LANE: ${{ inputs.lane }}
         FLAVOR: ${{ steps.names.outputs.flavor }}
         BUMP: ${{ inputs.bump }}
+        FASTLANE_DIR: ${{ inputs.fastlane-dir }}
         IN_KEY_ID: ${{ inputs.app-store-connect-key-id }}
         IN_ISSUER_ID: ${{ inputs.app-store-connect-issuer-id }}
         IN_KEY: ${{ inputs.app-store-connect-key }}
@@ -137,6 +142,10 @@ runs:
         SELF_HOSTED: ${{ runner.environment == 'self-hosted' }}
         MATCH_PASSWORD: ${{ inputs.match-password }}
       run: |
+        case "$IN_KEY" in
+          *"BEGIN PRIVATE KEY"*) ;;
+          *) IN_KEY=$(printf '%s' "$IN_KEY" | tr -d '[:space:]' | base64 --decode) ;;
+        esac
         # The credentials go under the names rn-ship.yml gives (validated env var names).
         export "$KEY_ID_ENV=$IN_KEY_ID" "$ISSUER_ID_ENV=$IN_ISSUER_ID" "$KEY_CONTENT_ENV=$IN_KEY"
         unset IN_KEY_ID IN_ISSUER_ID IN_KEY

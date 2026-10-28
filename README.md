@@ -27,7 +27,7 @@ EAS-style CI/CD for **bare React Native** apps: a fastlane plugin plus GitHub co
 | `rn_ship_config` | Loads and validates `rn-ship.yml`, reporting every problem with its key path. | Shipped |
 | `rn_ship_next_version` | Next version + build number from the store state. The store is the source of truth, a live version gets a patch bump, and `monotonic_build` keeps Play versionCodes counting. | Shipped |
 | `rn_ship_push_release` | Rebases the bump commit onto the remote branch, tags it and pushes both with `--atomic`, retrying when the other platform pushed first. | Shipped |
-| Store state readers | Reads the latest beta and live versions from TestFlight / App Store, and the internal track, highest versionCode and production release from Google Play. | Planned |
+| `rn_ship_store_state` | Reads what the store already has for a flavor: latest TestFlight build and live App Store version, or Play's beta track, highest versionCode on any track and live production release. Returns exactly the inputs of `rn_ship_next_version`. Read-only. | Shipped |
 | CI signing | A dedicated keychain on self-hosted Macs, read-only match everywhere, signing settings for the app and every extension. | Planned |
 | Android guards | Refuses to build without the upload key, refuses to ship a debug-signed AAB, pins the env file. Also reads/writes the Gradle version. | Planned |
 | Play listing | Assembles store copy into a `supply` folder with Play's character limits checked. | Planned |
@@ -55,7 +55,7 @@ flowchart TB
   subgraph Plugin["fastlane-plugin-rn_ship"]
     A["Actions: thin adapters<br/>options · type coercion · lane_context"]
     HP["Pure helpers<br/>RnShipVersioning · RnShipConfigSchema"]
-    HS["Side-effect helpers<br/>RnShipGitRelease · store state (planned) · signing (planned)"]
+    HS["Side-effect helpers<br/>RnShipGitRelease · RnShipStoreState · signing (planned)"]
   end
 
   CFG[("rn-ship.yml<br/>flavor map")]
@@ -108,7 +108,8 @@ sequenceDiagram
   GH->>Lane: push to staging → ios-deploy / android-deploy (planned)
   Lane->>RS: rn_ship_config
   RS-->>Lane: flavor_for_branch("staging") → scheme, bundle id, env file
-  Lane->>Store: latest beta, live version, highest build (planned)
+  Lane->>RS: rn_ship_store_state
+  RS->>Store: latest beta, live version, highest build (read-only)
   Lane->>RS: rn_ship_next_version
   RS-->>Lane: { version: "1.3.0", build: 14 }
   Lane->>Lane: write version, commit bump
@@ -130,6 +131,18 @@ The order is deliberate. The version is resolved from the store *before* the bui
 | `current_version`, `current_build` | the Xcode project | `versionName` / `versionCode` in `build.gradle` |
 | `latest_version`, `latest_build` | the newest TestFlight build | the newest internal-track release; `latest_build` = **highest versionCode on any track** |
 | `live_version` | the version live on the App Store | the newest production release (counts while still in review) |
+
+`rn_ship_store_state` reads all of these and returns them in that shape, so a lane is two calls:
+
+```ruby
+store = rn_ship_store_state(flavor: "staging")      # platform comes from the lane
+next_version = rn_ship_next_version(current_version: "1.3.0", current_build: 12, **store)
+```
+
+Two details matter here:
+
+- **"Nothing live" is not an error.** fastlane's `latest_testflight_build_number(live: true)` raises when no version is live, the same way it raises for an expired API key. A lane that rescues the first silently rescues the second, then skips the patch bump the store requires. rn-ship asks Spaceship directly, so "nothing live" is `nil` and a real failure still fails.
+- **A new app has no build 0.** fastlane reports a missing TestFlight build as build 1 by default. rn-ship passes `initial_build_number: 0`, so "nothing uploaded yet" and "build 1 uploaded" stay different.
 
 ```mermaid
 flowchart TD
@@ -221,6 +234,7 @@ rn-ship.yml is invalid:
 | CI creating or revoking certificates | match runs `readonly` on every CI runner, not just self-hosted ones. | Planned |
 | Taking over a developer's login keychain (self-hosted Mac) | A dedicated non-default keychain with a random password, first in the search list, deleted in `after_all` / `error`. Archives go to `$RUNNER_TEMP`. | Planned |
 | Credentials left on a persistent runner | Cleanup with `if: always()` removes keys, env files, the generated `.env` and `ios/tmp.xcconfig`. | Planned |
+| Expired API key read as "nothing live" | The live version is read through Spaceship, where "nothing live" is `nil` and an API failure raises. | Shipped |
 | Shipping a debug-signed AAB | The upload key is required, and the AAB's SHA-256 is compared against the debug keystore before upload. The first AAB permanently enrolls its key on Play. | Planned |
 | Build-only keys inside the app | react-native-config compiles *every* key of the env file into the app. Keep CI credentials out of `.env.*` files and in CI env vars. | documented |
 
@@ -249,11 +263,13 @@ rn-ship/
 │       │   ├── versioning.rb          # pure: bump_semver, resolve_next_version
 │       │   ├── config_schema.rb       # pure: SCHEMA + validator
 │       │   ├── config.rb              # RnShipConfig: loading, lookups, tags
-│       │   └── git_release.rb         # push_release
+│       │   ├── git_release.rb         # push_release
+│       │   └── store_state.rb         # App Store Connect / Play reads; pure Play track summary
 │       └── actions/
 │           ├── rn_ship_config.rb
 │           ├── rn_ship_next_version.rb
-│           └── rn_ship_push_release.rb
+│           ├── rn_ship_push_release.rb
+│           └── rn_ship_store_state.rb
 ├── spec/                              # RSpec, fixtures/splitify.yml
 ├── templates/                         # planned: reference Fastfiles
 ├── actions/                           # planned: GitHub composite actions
@@ -269,7 +285,9 @@ The gem and the GitHub actions share one repo and one version tag, so `fastlane-
 |---|---|---|
 | Pure logic | A table of real scenarios, one example each | 13 resolver scenarios + edge cases, 7 semver bumps |
 | Side effects | Against the real thing, locally: temporary bare git repos, a `pre-receive` hook that rejects the first N pushes, a second clone acting as "the other platform" | rebase onto a concurrent push, retry, give up, conflict abort |
-| Action wiring | A real lane parsed by `Fastlane::FastFile`, so option parsing, defaults and `lane_context` are exercised | `rn_ship_next_version`, `rn_ship_config` |
+| Action wiring | A real lane parsed by `Fastlane::FastFile`, so option parsing, defaults and `lane_context` are exercised | `rn_ship_next_version`, `rn_ship_config`, `rn_ship_store_state` composed with `rn_ship_next_version` |
+| Store APIs | Play tracks as recorded-shape doubles through the pure summary; Spaceship and Supply stubbed at their boundary, including "the edit is aborted even when listing fails" | `rn_ship_store_state` |
+| Real stores | Read-only run against Splitify's App Store Connect and Google Play apps, compared with fastlane's built-ins and Splitify's own lanes | manual, before each release |
 | Plugin loading | `fastlane run …` from a project with a `Pluginfile`, the way a consumer loads it | manual, before each release |
 | Real-world config | Splitify's actual setup as a fixture (irregular schemes, an app extension, custom tags) | `spec/fixtures/splitify.yml` |
 

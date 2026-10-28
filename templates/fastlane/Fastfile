@@ -113,7 +113,7 @@ platform :android do
     aab = lane_context[SharedValues::GRADLE_AAB_OUTPUT_PATH]
     rn_ship_verify_aab(aab: aab)
 
-    upload_to_play_store(**play_options(config, flavor), aab: aab)
+    upload_to_play_store(**play_options(config, flavor), aab: aab, version_name: version[:version])
 
     rn_ship_push_release(branch: flavor.branch, tag: config.beta_tag(platform: :android, flavor: flavor.name, **version))
   end
@@ -128,8 +128,10 @@ platform :android do
     state = lane_context[SharedValues::RN_SHIP_STORE_STATE]
     UI.user_error!("Nothing on the #{config.android['play']['track']} track for #{flavor.android['package_name']} yet") unless state[:beta_build]
 
-    upload_to_play_store(**play_options(config, flavor), track_promote_to: "production", version_code: state[:beta_build],
-                         skip_upload_aab: true, skip_upload_apk: true)
+    # supply reads the promoted release's status from track_promote_release_status, not release_status.
+    options = play_options(config, flavor)
+    upload_to_play_store(**options, track_promote_to: "production", track_promote_release_status: options[:release_status],
+                         version_code: state[:beta_build], skip_upload_aab: true, skip_upload_apk: true)
 
     push_tag!(config.release_tag(platform: :android, flavor: flavor.name, version: state[:latest_version], build: state[:beta_build]),
               "Android release #{state[:latest_version]} (#{state[:beta_build]})")

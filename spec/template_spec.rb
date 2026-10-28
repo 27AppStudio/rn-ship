@@ -142,7 +142,7 @@ describe "templates/fastlane/Fastfile" do
       expect(origin("tag", "--list")).to eq("v1.0.1-android-staging.13")
 
       expect(@calls[:GradleAction].first).to include(task: "bundle", flavor: "Staging", build_type: "Release")
-      expect(@calls[:UploadToPlayStoreAction].first).to include(package_name: "com.example.app.staging", track: "internal", aab: AndroidKeys.path("upload.aab"),
+      expect(@calls[:UploadToPlayStoreAction].first).to include(package_name: "com.example.app.staging", track: "internal", aab: AndroidKeys.path("upload.aab"), version_name: "1.0.1",
                                                                 json_key_data: "{\"type\":\"service_account\"}", release_status: "completed")
     end
 
@@ -168,7 +168,8 @@ describe "templates/fastlane/Fastfile" do
       store(latest_version: "1.0.0", latest_build: 12, beta_build: 11, max_build: 12, live_version: nil, monotonic_build: true)
       lane(:android, :release)
 
-      expect(@calls[:UploadToPlayStoreAction].first).to include(track: "internal", track_promote_to: "production", version_code: 11, skip_upload_aab: true)
+      expect(@calls[:UploadToPlayStoreAction].first).to include(track: "internal", track_promote_to: "production", track_promote_release_status: "completed",
+                                                                version_code: 11, skip_upload_aab: true)
       expect(origin("tag", "--list")).to eq("v1.0.0-android-11")
     end
 

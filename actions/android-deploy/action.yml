@@ -46,6 +46,9 @@ inputs:
   abis:
     description: reactNativeArchitectures for the store build, e.g. armeabi-v7a,arm64-v8a (empty keeps gradle.properties)
     default: ''
+  ruby-version:
+    description: Ruby for hosted runners (default .ruby-version; e.g. '3.4' when that exact version has no prebuilt build)
+    default: ''
   git-user-name:
     description: Author of the version-bump commit
     default: github-actions[bot]
@@ -79,6 +82,7 @@ runs:
     - uses: ruby/setup-ruby@v1
       if: runner.environment == 'github-hosted'
       with:
+        ruby-version: ${{ inputs.ruby-version || 'default' }}
         bundler-cache: true
 
     - name: Install gems (self-hosted)

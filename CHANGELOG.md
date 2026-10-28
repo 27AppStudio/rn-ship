@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Template: Play beta releases are named after the version; promotion passes `track_promote_release_status` (supply ignores `release_status` there). Deploy actions take `ruby-version`.
 - Deploy actions: `fastlane-dir` for per-platform fastlane folders (`ios/fastlane`, `android/fastlane`); `ios-deploy` takes the .p8 key as is or base64-encoded; `pod install` retries with `--repo-update` only when it fails; self-hosted runners keep gems in the tool cache (a pinned `vendor/bundle` becomes a link).
 - Composite actions `setup`, `ios-deploy`, `android-deploy`, `notify` and `examples/deploy.yml`. Secrets reach the shell only through `env:` (enforced by a spec), are written mode 600 and removed with `if: always()`; credentials are exported under the env var names from `rn-ship.yml`; the node_modules cache is saved before any build.
 - `templates/`: reference Fastfile (`ios`/`android` `beta` and `release`), Pluginfile and Gemfile.

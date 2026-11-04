@@ -58,7 +58,7 @@ module Fastlane
           'current = rn_ship_xcode_version(flavor: "staging")
           next_version = rn_ship_next_version(current_version: current[:version], current_build: current[:build], **rn_ship_store_state(flavor: "staging"))
           written = rn_ship_xcode_version(flavor: "staging", **next_version)
-          git_commit(path: written[:files], message: "Release #{next_version[:version]}")'
+          git_commit(path: written[:files], message: "chore(release): iOS #{next_version[:version]} (#{next_version[:build]})")'
         ]
       end
 

@@ -1,9 +1,4 @@
-<h1>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/wordmark-on-dark.svg">
-    <img src="docs/images/wordmark.svg" width="146" alt="rn-ship">
-  </picture>
-</h1>
+<h1><img src="docs/images/banner.svg" width="100%" alt="rn-ship by 27AppStudio"></h1>
 
 <p>
   <a href="https://github.com/27AppStudio/rn-ship/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/27AppStudio/rn-ship/ci.yml?branch=main&label=ci&labelColor=0B0B0F" alt="CI status"></a>

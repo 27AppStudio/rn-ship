@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Composite actions pin every third-party action to a commit SHA (same versions as before: setup-node 6.5.0, cache 5.1.0, setup-java 6.3.0, setup-gradle 6.4.1, setup-ruby 1.342.0, setup-xcode 1.7.0).
 - Template: `upload_to_testflight` gets the flavor's bundle id; pilot otherwise takes the Appfile's, sending a staging build to the production app. Found moving Splitify over, before its first deploy.
 - Template `beta` lanes refuse to run off their flavor's branch: the bump commit is pushed to that branch, so a run from a feature branch would push its commits there.
 - Template: Play beta releases are named after the version; promotion passes `track_promote_release_status` (supply ignores `release_status` there). Deploy actions take `ruby-version`.

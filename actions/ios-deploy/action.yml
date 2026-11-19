@@ -63,7 +63,7 @@ runs:
         EMAIL: ${{ inputs.git-user-email }}
       run: git config user.name "$NAME" && git config user.email "$EMAIL"
 
-    - uses: ruby/setup-ruby@v1
+    - uses: ruby/setup-ruby@f9c4492e86def3e644ab32a0ef185eda5b0c20d0 # v1.342.0
       if: runner.environment == 'github-hosted'
       with:
         ruby-version: ${{ inputs.ruby-version || 'default' }}
@@ -81,7 +81,7 @@ runs:
         FLAVOR: ${{ inputs.flavor }}
       run: bundle exec ruby "$GITHUB_ACTION_PATH/../scripts/credential-names.rb" ios "$FLAVOR"
 
-    - uses: maxim-lobanov/setup-xcode@v1
+    - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
       if: inputs.xcode-version != '' && runner.environment == 'github-hosted'
       with:
         xcode-version: ${{ inputs.xcode-version }}

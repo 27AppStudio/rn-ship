@@ -9,7 +9,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@v6
+    - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
       with:
         node-version-file: ${{ inputs.node-version-file }}
 
@@ -28,7 +28,7 @@ runs:
     # autolinking that way in Splitify). Bump the v-prefix to drop a poisoned cache.
     - name: Restore node_modules
       id: cache
-      uses: actions/cache/restore@v5
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
       with:
         path: |
           **/node_modules
@@ -51,7 +51,7 @@ runs:
     # file's values into node_modules during the build, and those must never be cached.
     - name: Save node_modules
       if: steps.cache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v5
+      uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
       with:
         path: |
           **/node_modules

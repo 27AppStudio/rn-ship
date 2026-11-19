@@ -67,19 +67,19 @@ runs:
       run: git config user.name "$NAME" && git config user.email "$EMAIL"
 
     # Only a build needs a JDK and Gradle; release just promotes on Play.
-    - uses: actions/setup-java@v6
+    - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
       if: inputs.lane != 'release'
       with:
         distribution: temurin
         java-version: ${{ inputs.java-version }}
 
     # Pull requests read the Gradle cache but never write it.
-    - uses: gradle/actions/setup-gradle@v6
+    - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
       if: inputs.lane != 'release'
       with:
         cache-read-only: ${{ github.event_name == 'pull_request' }}
 
-    - uses: ruby/setup-ruby@v1
+    - uses: ruby/setup-ruby@f9c4492e86def3e644ab32a0ef185eda5b0c20d0 # v1.342.0
       if: runner.environment == 'github-hosted'
       with:
         ruby-version: ${{ inputs.ruby-version || 'default' }}
